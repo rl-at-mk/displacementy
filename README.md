@@ -1,4 +1,4 @@
-# Displacement X
+# Displacement Y
 
 Procedural displacement sci-fi maps generator. Web-based alternative to [JSplacement](https://www.google.com/search?q=JSplacement) for [Blender](https://www.blender.org/).
 
@@ -26,11 +26,11 @@ Some links:
 - Web port of `JSplacement`: [JSPlacementWeb](https://github.com/satelllte/JSPlacementWeb) _(missing some features)_.
 - Consider supporting `Windmill` - the author of `JSPlacement`: [Website](https://windmillart.net/), [PayPal/WMillArt](https://www.paypal.com/paypalme/WMillArt), [Ko-fi/windmill](https://ko-fi.com/windmill).
 
-### Any future plans for `Displacement X`?
+### Any future plans for `Displacement Y`?
 
 No particular plans. I've opened the source code of this project to everyone, so let's see how it goes.
 
-### I want to share my work done with the help of `Displacement X`. Where can I do that?
+### I want to share my work done with the help of `Displacement Y`. Where can I do that?
 
 Feel free to open an issue in this repository to share your work. I'd love to see what you've created and showcase it right here!
 

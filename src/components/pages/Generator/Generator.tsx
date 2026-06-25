@@ -27,10 +27,10 @@ export function Generator() {
           </span>
         </FooterRow>
         <FooterRow>
-          <FooterLink href='https://github.com/satelllte/displacementx'>
+          <FooterLink href='https://github.com/rl-at-mk/displacementy'>
             GitHub
           </FooterLink>
-          <FooterLink href='https://github.com/satelllte/displacementx/releases'>
+          <FooterLink href='https://github.com/rl-at-mk/displacementy/releases'>
             Version History
           </FooterLink>
         </FooterRow>
