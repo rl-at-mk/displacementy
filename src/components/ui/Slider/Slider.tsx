@@ -60,8 +60,18 @@ export function Slider({label, min, max, step, ...dynamicProps}: SliderProps) {
         <RadixSlider.Track className='relative block h-1 grow rounded-full bg-white'>
           <RadixSlider.Range className='absolute h-full rounded-full bg-pink' />
         </RadixSlider.Track>
-        <Thumb id={thumb0Id} labelledBy={labelId} />
-        {dynamicProps.dual && <Thumb id={thumb1Id} labelledBy={labelId} />}
+        <Thumb
+          id={thumb0Id}
+          labelledBy={labelId}
+          ariaLabel={dynamicProps.dual ? `${label} minimum` : undefined}
+        />
+        {dynamicProps.dual && (
+          <Thumb
+            id={thumb1Id}
+            labelledBy={labelId}
+            ariaLabel={`${label} maximum`}
+          />
+        )}
       </RadixSlider.Root>
     </div>
   );
@@ -70,14 +80,19 @@ export function Slider({label, min, max, step, ...dynamicProps}: SliderProps) {
 type ThumbProps = {
   readonly id: string;
   readonly labelledBy: string;
+  readonly ariaLabel?: string;
 };
 
-function Thumb({id, labelledBy}: ThumbProps) {
+function Thumb({id, labelledBy, ariaLabel}: ThumbProps) {
   return (
     <RadixSlider.Thumb
       id={id}
       className='block h-3 w-3 bg-white hover:shadow-[0_0_0_2px] hover:shadow-pink focus:shadow-[0_0_0_2px] focus:shadow-pink focus:outline-hidden'
-      aria-labelledby={labelledBy}
+      // A dual slider has two thumbs sharing one visible label, so give each a
+      // distinct accessible name ("… minimum" / "… maximum"); a solo thumb
+      // falls back to the visible label.
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabel ? undefined : labelledBy}
     />
   );
 }

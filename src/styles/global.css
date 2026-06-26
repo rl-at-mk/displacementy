@@ -4,7 +4,7 @@
   --color-*: initial; /* disables Tailwind's default colors: https://tailwindcss.com/docs/colors#using-a-custom-palette */
   --color-white: #fff;
   --color-black: #000;
-  --color-pink: #be185d;
+  --color-pink: #ec4899;
   --color-sky: #0369a1;
 }
 

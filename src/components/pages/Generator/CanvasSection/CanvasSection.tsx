@@ -238,19 +238,27 @@ export function CanvasSection() {
           width={width}
           height={height}
           isRendering={isRendering}
+          isPristine={isPristine}
         />
       </div>
       <div className='flex flex-wrap gap-1 pt-2'>
         <Button disabled={isRendering} onClick={render}>
           Render
         </Button>
-        <Button disabled={isPristine || isRendering} onClick={download}>
+        <Button
+          disabled={isPristine || isRendering}
+          title={isPristine ? 'Render first to enable download' : undefined}
+          onClick={download}
+        >
           Download
         </Button>
         <Button onClick={copyUrl}>
           {justCopiedUrl ? 'Copied!' : 'Copy URL'}
         </Button>
       </div>
+      <span className='sr-only' role='status' aria-live='polite'>
+        {justCopiedUrl ? 'Shareable URL copied to clipboard' : ''}
+      </span>
       <SubSection title='Resolution'>
         <RadioGroup<Resolution>
           aria-label='Resolution'
@@ -267,12 +275,28 @@ export function CanvasSection() {
           Please note that changing the resolution resets canvas!
         </span>
       </SubSection>
-      <SubSection title='Inversion' disabled={invertDisabled}>
+      <SubSection
+        title='Inversion'
+        disabled={invertDisabled}
+        hint={
+          isPristine
+            ? 'Render first to enable.'
+            : 'Return to the original preview to enable.'
+        }
+      >
         <Button disabled={isRendering || invertDisabled} onClick={invert}>
           Invert
         </Button>
       </SubSection>
-      <SubSection title='Normal' disabled={normalDisabled}>
+      <SubSection
+        title='Normal'
+        disabled={normalDisabled}
+        hint={
+          isPristine
+            ? 'Render first to enable.'
+            : 'Showing another preview — return to the original first.'
+        }
+      >
         <Button
           disabled={isRendering || normalDisabled}
           onClick={togglePreviewFor('normal')}
@@ -280,7 +304,15 @@ export function CanvasSection() {
           Preview {previewType === 'normal' ? 'original' : 'normal'}
         </Button>
       </SubSection>
-      <SubSection title='Color' disabled={colorDisabled}>
+      <SubSection
+        title='Color'
+        disabled={colorDisabled}
+        hint={
+          isPristine
+            ? 'Render first to enable.'
+            : 'Showing another preview — return to the original first.'
+        }
+      >
         <Button
           disabled={isRendering || colorDisabled}
           onClick={togglePreviewFor('color')}
