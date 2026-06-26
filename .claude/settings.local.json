@@ -9,7 +9,22 @@
       "PowerShell(npm run test:units 2>&1)",
       "PowerShell(npx vitest run src/utils/random.test.ts -u 2>&1)",
       "PowerShell(npx vitest run 2>&1)",
-      "PowerShell(npx prettier --write \"src/utils/random.test.ts\")"
+      "PowerShell(npx prettier --write \"src/utils/random.test.ts\")",
+      "PowerShell(npm ls astro @astrojs/react 2>$null; Write-Output \"=== LATEST ===\"; Write-Output \\(\"astro latest: \" + \\(npm view astro version\\)\\); Write-Output \\(\"astro dist-tags:\"\\); npm view astro dist-tags --json; Write-Output \\(\"@astrojs/react latest: \" + \\(npm view @astrojs/react version\\)\\); Write-Output \\(\"@astrojs/react peer deps:\"\\); npm view @astrojs/react@latest peerDependencies --json)",
+      "PowerShell(Write-Output \\(\"node: \" + \\(node -v\\)\\); Write-Output \"=== astro@7 engines/peers ===\"; npm view astro@7.0.3 engines peerDependencies --json; Write-Output \"=== astro@6 latest version ===\"; npm view astro@6 version; Write-Output \"=== @astrojs/react@5 + @6 astro peer ===\"; npm view @astrojs/react@5 peerDependencies --json; npm view @astrojs/react@6.0.0 peerDependencies --json)",
+      "WebFetch(domain:docs.astro.build)",
+      "Bash(npm view *)",
+      "PowerShell(npm install astro@7 @astrojs/react@6 @tailwindcss/vite@4.3.1 @tailwindcss/postcss@4.3.1 tailwindcss@4.3.1 2>&1)",
+      "PowerShell(npm ls astro @astrojs/react @tailwindcss/vite vite 2>$null)",
+      "PowerShell(npx astro check 2>&1)",
+      "PowerShell(npm run build 2>&1)",
+      "PowerShell(npx prettier --write astro.config.mjs)",
+      "PowerShell(npm audit 2>&1)",
+      "PowerShell(npm audit fix 2>&1)",
+      "PowerShell(npm run dev 2>&1)",
+      "PowerShell(npx astro dev status 2>&1)",
+      "PowerShell(npx astro dev logs 2>&1)",
+      "PowerShell(npx astro dev stop 2>&1)"
     ]
   }
 }
