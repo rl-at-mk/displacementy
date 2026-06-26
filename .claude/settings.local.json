@@ -24,7 +24,10 @@
       "PowerShell(npm run dev 2>&1)",
       "PowerShell(npx astro dev status 2>&1)",
       "PowerShell(npx astro dev logs 2>&1)",
-      "PowerShell(npx astro dev stop 2>&1)"
+      "PowerShell(npx astro dev stop 2>&1)",
+      "PowerShell(npx prettier --write src/components/pages/Generator/store.ts src/components/pages/Generator/Generator.tsx)",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

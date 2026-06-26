@@ -1,8 +1,20 @@
+import {useEffect, useRef} from 'react';
 import {softwareVersion} from '@/constants/softwareVersion';
 import {CanvasSection} from './CanvasSection';
 import {SettingsSection} from './SettingsSection';
+import {useStore} from './store';
 
 export function Generator() {
+  // Apply the URL/random values once after mount. Doing this here (rather than
+  // at store creation) keeps the first client render equal to the server render
+  // so hydration succeeds; the values update immediately afterwards.
+  const initialized = useRef(false);
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    useStore.getState().initializeValues();
+  }, []);
+
   return (
     <div className='mx-auto max-w-screen-2xl'>
       <header className='p-4'>

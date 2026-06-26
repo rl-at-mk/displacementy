@@ -128,6 +128,14 @@ type ComputedValues = {
 };
 
 type Actions = {
+  /**
+   * Resolves the real initial values (URL query params, or a fresh random set
+   * when there are none) and applies them. Must be called from a client-side
+   * effect after mount — never during render — so that the server-rendered HTML
+   * and the first client render both show the deterministic defaults and React
+   * can hydrate without a mismatch.
+   */
+  initializeValues: () => void;
   randomize: () => void;
   randomizeRect: () => void;
   randomizeGrid: () => void;
@@ -168,7 +176,10 @@ export const useStore = create<Values & Setters & ComputedValues & Actions>(
   (set, get) => ({
     // Values
     // ---
-    ...getInitialValues(),
+    // Always start from the deterministic defaults so SSR and the first client
+    // render match. The real values (URL params or a random set) are applied
+    // client-side via `initializeValues()` after hydration.
+    ...defaultValues(),
     // Setters
     // ---
     setInitialSeed(initialSeed: Values['initialSeed']) {
@@ -311,6 +322,9 @@ export const useStore = create<Values & Setters & ComputedValues & Actions>(
     },
     // Actions
     // ---
+    initializeValues() {
+      set(() => getInitialValues());
+    },
     randomize() {
       set(() => randomValues());
     },
@@ -509,10 +523,12 @@ function parseList<T extends string>(
 }
 
 /**
- * Initial values for the store. When the page is opened with query
- * parameters, each known setting is read from the URL (falling back to its
- * default when absent). When opened with no parameters at all, everything is
- * randomized — matching the previous "fresh pattern on every refresh" behavior.
+ * Resolves the values to apply on the client after mount (via the
+ * `initializeValues` action). When the page is opened with query parameters,
+ * each known setting is read from the URL (falling back to its default when
+ * absent). When opened with no parameters at all, everything is randomized —
+ * matching the "fresh pattern on every refresh" behavior. The `window` guard is
+ * defensive; this is only ever called client-side.
  */
 function getInitialValues(): Values {
   if (typeof window === 'undefined') return defaultValues();
