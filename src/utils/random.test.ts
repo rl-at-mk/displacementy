@@ -1,299 +1,124 @@
-import {type MockInstance, describe, expect, it, vi, afterAll} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {
   randomBoolean,
   randomColorRGB,
   randomInteger,
   randomItem,
+  setSeed,
 } from './random';
-import {type ColorRGB} from '../types';
 
-describe('randomBoolean', () => {
-  const {mock, unmock} = useMathRandomMock();
+// The generators are driven by a seeded Mulberry32 PRNG (see `random.ts`), not
+// by `Math.random()`. Pinning the seed first makes every sequence reproducible,
+// so these snapshots are stable across runs.
+const collect = <T>(seed: number, count: number, fn: () => T): T[] => {
+  setSeed(seed);
+  return Array.from({length: count}, () => fn());
+};
 
-  afterAll(() => {
-    unmock();
+const SEED = 12345;
+
+describe('setSeed', () => {
+  it('reproduces the same sequence for the same seed', () => {
+    const first = collect(SEED, 10, () => randomInteger(0, 1000));
+    const second = collect(SEED, 10, () => randomInteger(0, 1000));
+    expect(second).toEqual(first);
   });
 
-  it('works correctly', () => {
-    const results: Array<{
-      mock: number;
-      result: boolean;
-    }> = [];
-
-    for (let i = 0; i < 0.999; i += 0.1) {
-      const m = Math.round(i * 100) / 100;
-      mock(m);
-      results.push({
-        mock: m,
-        result: randomBoolean(),
-      });
-    }
-
-    expect(results).toMatchInlineSnapshot(`
-      [
-        {
-          "mock": 0,
-          "result": false,
-        },
-        {
-          "mock": 0.1,
-          "result": false,
-        },
-        {
-          "mock": 0.2,
-          "result": false,
-        },
-        {
-          "mock": 0.3,
-          "result": false,
-        },
-        {
-          "mock": 0.4,
-          "result": false,
-        },
-        {
-          "mock": 0.5,
-          "result": true,
-        },
-        {
-          "mock": 0.6,
-          "result": true,
-        },
-        {
-          "mock": 0.7,
-          "result": true,
-        },
-        {
-          "mock": 0.8,
-          "result": true,
-        },
-        {
-          "mock": 0.9,
-          "result": true,
-        },
-      ]
-    `);
+  it('produces different sequences for different seeds', () => {
+    const a = collect(1, 10, () => randomInteger(0, 1000));
+    const b = collect(2, 10, () => randomInteger(0, 1000));
+    expect(b).not.toEqual(a);
   });
 });
 
-describe('randomColorRGB', () => {
-  const {mockMultiOnce, unmock} = useMathRandomMock();
-
-  afterAll(() => {
-    unmock();
+describe('randomBoolean', () => {
+  it('returns booleans', () => {
+    const results = collect(SEED, 20, randomBoolean);
+    expect(results.every((r) => typeof r === 'boolean')).toBe(true);
   });
 
-  it('works correctly', () => {
-    const results: Array<{
-      mocks: number[];
-      result: ColorRGB;
-    }> = [];
-
-    const max = 0.999;
-    for (let i = 0; i < max; i += 0.1) {
-      const m = Math.round(i * 100) / 100;
-      const mocks = [
-        Math.min(m, max),
-        Math.min(m + 0.05, max),
-        Math.min(m + 0.1, max),
-      ];
-      mockMultiOnce(mocks);
-      results.push({
-        mocks,
-        result: randomColorRGB(),
-      });
-    }
-
-    expect(results).toMatchInlineSnapshot(`
+  it('is reproducible', () => {
+    expect(collect(SEED, 10, randomBoolean)).toMatchInlineSnapshot(`
       [
-        {
-          "mocks": [
-            0,
-            0.05,
-            0.1,
-          ],
-          "result": {
-            "b": 25,
-            "g": 12,
-            "r": 0,
-          },
-        },
-        {
-          "mocks": [
-            0.1,
-            0.15000000000000002,
-            0.2,
-          ],
-          "result": {
-            "b": 51,
-            "g": 38,
-            "r": 25,
-          },
-        },
-        {
-          "mocks": [
-            0.2,
-            0.25,
-            0.30000000000000004,
-          ],
-          "result": {
-            "b": 76,
-            "g": 64,
-            "r": 51,
-          },
-        },
-        {
-          "mocks": [
-            0.3,
-            0.35,
-            0.4,
-          ],
-          "result": {
-            "b": 102,
-            "g": 89,
-            "r": 76,
-          },
-        },
-        {
-          "mocks": [
-            0.4,
-            0.45,
-            0.5,
-          ],
-          "result": {
-            "b": 128,
-            "g": 115,
-            "r": 102,
-          },
-        },
-        {
-          "mocks": [
-            0.5,
-            0.55,
-            0.6,
-          ],
-          "result": {
-            "b": 153,
-            "g": 140,
-            "r": 128,
-          },
-        },
-        {
-          "mocks": [
-            0.6,
-            0.65,
-            0.7,
-          ],
-          "result": {
-            "b": 179,
-            "g": 166,
-            "r": 153,
-          },
-        },
-        {
-          "mocks": [
-            0.7,
-            0.75,
-            0.7999999999999999,
-          ],
-          "result": {
-            "b": 204,
-            "g": 192,
-            "r": 179,
-          },
-        },
-        {
-          "mocks": [
-            0.8,
-            0.8500000000000001,
-            0.9,
-          ],
-          "result": {
-            "b": 230,
-            "g": 217,
-            "r": 204,
-          },
-        },
-        {
-          "mocks": [
-            0.9,
-            0.9500000000000001,
-            0.999,
-          ],
-          "result": {
-            "b": 255,
-            "g": 243,
-            "r": 230,
-          },
-        },
+        true,
+        false,
+        true,
+        false,
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
       ]
     `);
   });
 });
 
 describe('randomInteger', () => {
-  const {mock, unmock} = useMathRandomMock();
-
-  afterAll(() => {
-    unmock();
+  it('stays within the inclusive range', () => {
+    setSeed(SEED);
+    for (let i = 0; i < 1000; i++) {
+      const n = randomInteger(5, 15);
+      expect(n).toBeGreaterThanOrEqual(5);
+      expect(n).toBeLessThanOrEqual(15);
+    }
   });
 
-  it('works correctly', () => {
-    const results: Array<{
-      mock: number;
-      result: number;
-    }> = [];
+  it('can return both range bounds', () => {
+    setSeed(SEED);
+    const seen = new Set<number>();
+    for (let i = 0; i < 1000; i++) seen.add(randomInteger(0, 3));
+    expect(seen).toEqual(new Set([0, 1, 2, 3]));
+  });
 
-    for (let i = 0; i < 0.999; i += 0.1) {
-      const m = Math.round(i * 100) / 100;
-      mock(m);
-      results.push({
-        mock: m,
-        result: randomInteger(0, 10),
-      });
+  it('is reproducible', () => {
+    expect(collect(SEED, 10, () => randomInteger(0, 10)))
+      .toMatchInlineSnapshot(`
+      [
+        7,
+        5,
+        5,
+        3,
+        7,
+        7,
+        6,
+        0,
+        3,
+        4,
+      ]
+    `);
+  });
+});
+
+describe('randomColorRGB', () => {
+  it('returns channels within [0, 255]', () => {
+    const results = collect(SEED, 50, randomColorRGB);
+    for (const {r, g, b} of results) {
+      for (const channel of [r, g, b]) {
+        expect(channel).toBeGreaterThanOrEqual(0);
+        expect(channel).toBeLessThanOrEqual(255);
+      }
     }
+  });
 
-    expect(results).toMatchInlineSnapshot(`
+  it('is reproducible', () => {
+    expect(collect(SEED, 3, randomColorRGB)).toMatchInlineSnapshot(`
       [
         {
-          "mock": 0,
-          "result": 0,
+          "b": 134,
+          "g": 118,
+          "r": 182,
         },
         {
-          "mock": 0.1,
-          "result": 1,
+          "b": 178,
+          "g": 173,
+          "r": 73,
         },
         {
-          "mock": 0.2,
-          "result": 2,
-        },
-        {
-          "mock": 0.3,
-          "result": 3,
-        },
-        {
-          "mock": 0.4,
-          "result": 4,
-        },
-        {
-          "mock": 0.5,
-          "result": 5,
-        },
-        {
-          "mock": 0.6,
-          "result": 6,
-        },
-        {
-          "mock": 0.7,
-          "result": 7,
-        },
-        {
-          "mock": 0.8,
-          "result": 8,
-        },
-        {
-          "mock": 0.9,
-          "result": 9,
+          "b": 76,
+          "g": 10,
+          "r": 148,
         },
       ]
     `);
@@ -301,158 +126,32 @@ describe('randomInteger', () => {
 });
 
 describe('randomItem', () => {
-  const {mock, unmock} = useMathRandomMock();
-
-  afterAll(() => {
-    unmock();
+  it('returns undefined for an empty array', () => {
+    setSeed(SEED);
+    expect(randomItem([] as number[])).toBeUndefined();
   });
 
-  it('returns undefined if array is empty', () => {
-    const results: Array<{
-      mock: number;
-      result: number | undefined;
-    }> = [];
-
-    for (let i = 0; i < 0.999; i += 0.1) {
-      const m = Math.round(i * 100) / 100;
-      mock(m);
-      results.push({
-        mock: m,
-        result: randomItem([] as number[]),
-      });
-    }
-
-    expect(results).toMatchInlineSnapshot(`
-      [
-        {
-          "mock": 0,
-          "result": undefined,
-        },
-        {
-          "mock": 0.1,
-          "result": undefined,
-        },
-        {
-          "mock": 0.2,
-          "result": undefined,
-        },
-        {
-          "mock": 0.3,
-          "result": undefined,
-        },
-        {
-          "mock": 0.4,
-          "result": undefined,
-        },
-        {
-          "mock": 0.5,
-          "result": undefined,
-        },
-        {
-          "mock": 0.6,
-          "result": undefined,
-        },
-        {
-          "mock": 0.7,
-          "result": undefined,
-        },
-        {
-          "mock": 0.8,
-          "result": undefined,
-        },
-        {
-          "mock": 0.9,
-          "result": undefined,
-        },
-      ]
-    `);
+  it('only returns items from the array', () => {
+    const items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const results = collect(SEED, 50, () => randomItem(items));
+    expect(results.every((r) => items.includes(r as number))).toBe(true);
   });
 
-  it('returns random item correctly', () => {
-    const results: Array<{
-      mock: number;
-      result: number | undefined;
-    }> = [];
-
-    for (let i = 0; i < 0.999; i += 0.1) {
-      const m = Math.round(i * 100) / 100;
-      mock(m);
-      results.push({
-        mock: m,
-        result: randomItem([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
-      });
-    }
-
-    expect(results).toMatchInlineSnapshot(`
+  it('is reproducible', () => {
+    const items = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    expect(collect(SEED, 10, () => randomItem(items))).toMatchInlineSnapshot(`
       [
-        {
-          "mock": 0,
-          "result": 1,
-        },
-        {
-          "mock": 0.1,
-          "result": 2,
-        },
-        {
-          "mock": 0.2,
-          "result": 3,
-        },
-        {
-          "mock": 0.3,
-          "result": 4,
-        },
-        {
-          "mock": 0.4,
-          "result": 5,
-        },
-        {
-          "mock": 0.5,
-          "result": 6,
-        },
-        {
-          "mock": 0.6,
-          "result": 7,
-        },
-        {
-          "mock": 0.7,
-          "result": 8,
-        },
-        {
-          "mock": 0.8,
-          "result": 9,
-        },
-        {
-          "mock": 0.9,
-          "result": 10,
-        },
+        8,
+        5,
+        6,
+        3,
+        7,
+        7,
+        6,
+        1,
+        3,
+        5,
       ]
     `);
   });
 });
-
-const useMathRandomMock = () => {
-  let _spy: MockInstance | undefined;
-
-  const mock = (returnValue: number) => {
-    unmock();
-    vi.spyOn(global.Math, 'random').mockReturnValue(returnValue);
-  };
-
-  const mockMultiOnce = (returnValues: number[]) => {
-    unmock();
-    returnValues.forEach((returnValue) => {
-      _spy = vi.spyOn(global.Math, 'random').mockReturnValueOnce(returnValue);
-    });
-  };
-
-  const unmock = () => {
-    _spy?.mockRestore();
-    _spy = undefined;
-  };
-
-  return {
-    mock,
-    mockMultiOnce,
-    unmock,
-  };
-};

@@ -6,7 +6,10 @@
       "Bash(echo \"EXIT:$?\")",
       "PowerShell(npm run test:types)",
       "WebSearch",
-      "PowerShell(npm run test:units 2>&1)"
+      "PowerShell(npm run test:units 2>&1)",
+      "PowerShell(npx vitest run src/utils/random.test.ts -u 2>&1)",
+      "PowerShell(npx vitest run 2>&1)",
+      "PowerShell(npx prettier --write \"src/utils/random.test.ts\")"
     ]
   }
 }
