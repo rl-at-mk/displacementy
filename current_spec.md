@@ -1,7 +1,8 @@
 # Spec — CPU Float-Precision Rendering Core (for true 16-bit export)
 
-> Status: **proposed, not implemented.** This is the active spec. (The prior
-> parameter-locks spec was fully implemented and removed; the code is its record.)
+> Status: **Phase 0 implemented; Phases A–D pending.** This is the active spec.
+> (The prior parameter-locks spec was fully implemented and removed; the code is
+> its record.)
 
 ## Goal
 
@@ -17,7 +18,7 @@ Copy-URL and the parameter locks depend on).
 A `CanvasRenderingContext2D` is **8-bit per channel, unconditionally** —
 `getImageData` returns a `Uint8ClampedArray`. Every one of the hundreds–thousands
 of composited passes in `draw()` is rounded to 8 bits, so quantization is
-*cumulative*. By the time generation ends there are at most **256 distinct
+_cumulative_. By the time generation ends there are at most **256 distinct
 levels**; exporting that to 16-bit only rescales 8-bit data into a 16-bit
 container (~99.6% of code points unused) and preserves every terrace edge. **The
 precision must be captured during accumulation, not at export** — which is why
@@ -44,7 +45,7 @@ the accumulation buffer cannot stay Canvas2D.
   - **Rationale for single channel:** all draws are grayscale (`r=g=b` via
     `xxx`/`xxxa`), and an RGBA `Float32Array` at 8192² is **~1 GiB**
     (`8192² × 4ch × 4B`). Single channel is **~256 MB** — still heavy but
-    feasible. Color only matters at the *color-preview* stage (a LUT applied on
+    feasible. Color only matters at the _color-preview_ stage (a LUT applied on
     read), so it does not need to live in the accumulation buffer.
   - **Decided:** single-channel grayscale — the output is a height map; color is
     only ever applied at the color-preview LUT stage. (See Decisions.)
@@ -65,7 +66,7 @@ Each op writes into the float buffer via **software rasterization** instead of
 ### Blend modes (the bulk of the work)
 
 Canvas's `globalCompositeOperation` conflates **two** categories that must both be
-reimplemented per the W3C *Compositing and Blending Level 1* spec:
+reimplemented per the W3C _Compositing and Blending Level 1_ spec:
 
 - **Porter-Duff compositing operators:** `source-over`, `source-atop`, `xor`,
   `lighter`.
@@ -108,7 +109,7 @@ EXR / TIFF / raw → 32-bit float.**
 practical heightmap standard. 32-bit float mainly buys HDR range, out-of-`0..1`
 headroom, and extreme-amplification future-proofing — not a visible jump over a
 clean 16-bit map (the generator works in normalized `0..1` grayscale). It is cheap
-to offer *because* the buffer is already float, so treat it as a pro / future-proof
+to offer _because_ the buffer is already float, so treat it as a pro / future-proof
 option rather than a quality necessity.
 
 ## Determinism
@@ -116,13 +117,19 @@ option rather than a quality necessity.
 - PRNG stays Mulberry32, same consumption order → reproducible on any machine.
 - **Baseline change (important):** switching from implicit 8-bit canvas rounding
   to explicit float math **changes the exact output bytes vs. today's renderer**.
-  Determinism is preserved *within* the new renderer, but **previously shared URLs
+  Determinism is preserved _within_ the new renderer, but **previously shared URLs
   will render differently**. Recommendation: accept a new rendering baseline (the
   app is pre-1.0, v0.1.0, and this is a quality improvement); optionally stamp a
-  renderer-version in the URL going forward. Open decision C.
-- **Determinism guard (prerequisite):** before any renderer change, add a test
-  that renders fixed seeds and hashes the quantized output, asserting stability
-  across runs. Every phase must keep it green.
+  renderer-version in the URL going forward. (Decided — see Decisions C: accept the
+  new baseline, no shim.)
+- **Determinism guard (prerequisite — DONE, Phase 0):** implemented in
+  [draw.determinism.test.ts](src/components/pages/Generator/CanvasSection/utils/draw.determinism.test.ts).
+  It records the ordered **operation trace** `draw()` issues for a fixed seed
+  (against a stub context, not pixels) and hashes it, asserting: same seed → same
+  trace, different seed → different trace, and a baseline-hash tripwire. The op
+  trace is pure PRNG output, so it must stay invariant when the rasterizer is
+  swapped for the float core — making it the correct guard. Every phase must keep
+  it green.
 
 ## Performance & memory
 
@@ -157,7 +164,7 @@ comes only after the float core is proven correct.
 
 Correctness phases (in order):
 
-- **Phase 0** — Determinism guard test (fixed seeds → hashed output).
+- **Phase 0 ✅ DONE** — Determinism guard test (op-trace hash per seed).
 - **Phase A** — Float buffer + background + rect/grid/cols/rows/lines + the 16
   blend modes + 8-bit display path. (No sprites.) Runs on the main thread with the
   existing rAF batching.
@@ -191,15 +198,14 @@ Resolved:
   `UPNG.js` as an alternative). 32-bit float raw `.r32` needs no package (direct byte
   dump); EXR / float TIFF, if pursued, also via existing packages. Final library pick
   confirmed at implementation.
+- **C. Rendering baseline — accept the new baseline; no compatibility shim.** There
+  are no users yet, so previously shared URLs are not a concern. The float math
+  changes exact output and that is fine. (Optionally stamp a renderer version in the
+  URL later to guard _future_ baseline changes.)
 - **D. Web Worker — deferred to the later performance stage (Phase D).** Correctness
   first.
 
-Still open:
-
-- **C. Rendering baseline** — the float math changes exact output, so previously
-  shared URLs will render differently. Recommended default: **accept the new
-  baseline** and document it (the app is pre-1.0); optionally stamp a renderer
-  version in the URL to guard future changes. Decide before Phase A ships.
+All decisions resolved; ready to implement starting at Phase 0.
 
 ## Out of scope
 

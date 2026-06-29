@@ -27,7 +27,9 @@
       "PowerShell(npx astro dev stop 2>&1)",
       "PowerShell(npx prettier --write src/components/pages/Generator/store.ts src/components/pages/Generator/Generator.tsx)",
       "mcp__Claude_in_Chrome__navigate",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell(npx vitest run src/components/pages/Generator/CanvasSection/utils/draw.determinism.test.ts -u 2>&1)",
+      "PowerShell(npx prettier --write \"src/components/pages/Generator/CanvasSection/utils/draw.determinism.test.ts\" \"current_spec.md\")"
     ]
   }
 }
