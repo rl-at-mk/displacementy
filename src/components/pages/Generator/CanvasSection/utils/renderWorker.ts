@@ -9,7 +9,13 @@ export type RenderRequest = {
 
 export type RenderResponse =
   | {type: 'progress'; fraction: number}
-  | {type: 'done'; rgba: Uint8ClampedArray; width: number; height: number};
+  | {
+      type: 'done';
+      rgba: Uint8ClampedArray;
+      heights: Float32Array;
+      width: number;
+      height: number;
+    };
 
 // Dedicated-worker global. Casting avoids pulling in the "webworker" TS lib,
 // which conflicts with the project's "dom" lib.
@@ -30,7 +36,12 @@ worker.onmessage = (event) => {
     },
   });
 
+  // Read RGBA (for display) before transferring the float buffer (export).
   const rgba = target.toRGBA();
-  // Transfer the pixel buffer (zero-copy) back to the main thread.
-  worker.postMessage({type: 'done', rgba, width, height}, [rgba.buffer]);
+  const heights = target.heights;
+  // Transfer both pixel buffers (zero-copy) back to the main thread.
+  worker.postMessage({type: 'done', rgba, heights, width, height}, [
+    rgba.buffer,
+    heights.buffer,
+  ]);
 };

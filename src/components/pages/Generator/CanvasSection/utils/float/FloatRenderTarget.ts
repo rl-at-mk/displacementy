@@ -189,9 +189,14 @@ export class FloatRenderTarget {
   }
 
   /**
-   * Quantize the float buffer to straight 8-bit RGBA. Returned as a
+   * Quantize the float buffer to **opaque** 8-bit grayscale RGBA. Returned as a
    * `Uint8ClampedArray` whose buffer can be transferred from the Worker to the
    * main thread and wrapped in `ImageData` for `putImageData`.
+   *
+   * Alpha is forced opaque: a height map has no transparency — the alpha channel
+   * is only a compositing intermediary (some modes, e.g. `xor`, reduce it during
+   * accumulation). Emitting the value opaque keeps the 8-bit display/export
+   * consistent with the 16-bit export, which is grayscale-only.
    */
   toRGBA(): Uint8ClampedArray {
     const out = new Uint8ClampedArray(this.#w * this.#h * 4);
@@ -201,7 +206,7 @@ export class FloatRenderTarget {
       out[o] = g;
       out[o + 1] = g;
       out[o + 2] = g;
-      out[o + 3] = Math.round(this.#alpha[i] * 255);
+      out[o + 3] = 255;
     }
     return out;
   }

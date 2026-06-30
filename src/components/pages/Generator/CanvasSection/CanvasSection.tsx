@@ -13,11 +13,13 @@ import {drawNormal} from './utils/drawNormal';
 import {drawColor} from './utils/drawColor';
 import {drawInvert} from './utils/drawInvert';
 import {saveImage} from './utils/saveImage';
+import {encodeHeightmap16} from './utils/heightmapPng';
 import {getCtx2dFromRef} from './utils/getCtx2dFromRef';
 import {getCanvasDimensions} from './utils/getCanvasDimensions';
 
 type Resolution = '1024' | '2048' | '4096' | '8192';
 type PreviewType = 'original' | 'normal' | 'color';
+type BitDepth = '8' | '16';
 
 export function CanvasSection() {
   const [resolution, setResolution] = useState<Resolution>('2048');
@@ -26,16 +28,24 @@ export function CanvasSection() {
 
   const [isPristine, setIsPristine] = useState<boolean>(true);
   const [isRendering, setIsRendering] = useState<boolean>(false);
+  const [progress, setProgress] = useState<number>(0);
   const [previewType, setPreviewType] = useState<PreviewType>('original');
   const [justCopiedUrl, setJustCopiedUrl] = useState<boolean>(false);
+  const [bitDepth, setBitDepth] = useState<BitDepth>('8');
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasOriginalPreviewDataUrl = useRef<string | undefined>(undefined);
   const gradientCanvasRef = useRef<HTMLCanvasElement>(null);
+  // The most recent render's float height buffer, retained for high-bit-depth
+  // export. Independent of preview state; invalidated on resolution change.
+  const lastHeightsRef = useRef<
+    {data: Float32Array; width: number; height: number} | undefined
+  >(undefined);
 
   const render = () => {
     setIsPristine(false);
     setIsRendering(true);
+    setProgress(0);
     setPreviewType('original');
 
     const ctx2d = getCtx2dFromRef(canvasRef);
@@ -110,7 +120,17 @@ export function CanvasSection() {
       );
       worker.onmessage = (event: MessageEvent<RenderResponse>) => {
         const message = event.data;
-        if (message.type !== 'done') return; // progress messages: unused for now
+        if (message.type === 'progress') {
+          setProgress(message.fraction);
+          return;
+        }
+
+        // Retain the float height buffer for high-bit-depth export.
+        lastHeightsRef.current = {
+          data: message.heights,
+          width: message.width,
+          height: message.height,
+        };
 
         ctx2d.putImageData(
           new ImageData(message.rgba, message.width, message.height),
@@ -158,6 +178,23 @@ export function CanvasSection() {
       return `${y}-${m}-${d}-${hh}${mm}${ss}`;
     };
 
+    // 16-bit: export the retained float height buffer as a 16-bit grayscale PNG
+    // (always the height map, at full precision — independent of any preview).
+    if (bitDepth === '16') {
+      const heightmap = lastHeightsRef.current;
+      if (!heightmap) return;
+      const {data, width: w, height: h} = heightmap;
+      const png = encodeHeightmap16(data, w, h);
+      const url = URL.createObjectURL(new Blob([png], {type: 'image/png'}));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `DisplacementY_${w}x${h}_${dateTimeString()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    // 8-bit: the visible canvas as-is (respects the current preview/inversion).
     saveImage({
       canvas,
       fileName: `DisplacementY_${width}x${height}_${dateTimeString()}`,
@@ -250,6 +287,7 @@ export function CanvasSection() {
           height={height}
           isRendering={isRendering}
           isPristine={isPristine}
+          progress={progress}
         />
       </div>
       <div className='flex flex-wrap gap-1 pt-2'>
@@ -280,10 +318,32 @@ export function CanvasSection() {
             {value: '8192', label: '8192x8192'},
           ]}
           value={resolution}
-          setValue={setResolution}
+          setValue={(value) => {
+            // Changing resolution resets the canvas, so the retained height
+            // buffer (and any preview) no longer matches — invalidate them.
+            setResolution(value);
+            setIsPristine(true);
+            setPreviewType('original');
+            lastHeightsRef.current = undefined;
+          }}
         />
         <span className='text-xs text-pink italic'>
           Please note that changing the resolution resets canvas!
+        </span>
+      </SubSection>
+      <SubSection title='Bit depth'>
+        <RadioGroup<BitDepth>
+          aria-label='Export bit depth'
+          items={[
+            {value: '8', label: '8-bit'},
+            {value: '16', label: '16-bit'},
+          ]}
+          value={bitDepth}
+          setValue={setBitDepth}
+        />
+        <span className='text-xs text-white/70 italic'>
+          16-bit exports the grayscale height map at full precision (no
+          banding).
         </span>
       </SubSection>
       <SubSection

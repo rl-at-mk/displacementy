@@ -1,8 +1,28 @@
 # Spec — CPU Float-Precision Rendering Core (for true 16-bit export)
 
-> Status: **Phases 0 + A + B + D implemented and verified in-browser; Phase C
-> (high-bit-depth export) pending.** This is the active spec. (The prior
-> parameter-locks spec was fully implemented and removed; the code is its record.)
+> Status: **Phases 0 + A + B + D done and verified in-browser; Phase C in
+> progress (16-bit PNG export done; 32-bit pending).** This is the active spec.
+> (The prior parameter-locks spec was fully implemented and removed; the code is
+> its record.)
+>
+> **Phase C progress — 16-bit height export.** The Worker now transfers the
+> `Float32` height buffer back alongside the 8-bit RGBA; the main thread retains
+> it (invalidated on resolution change) and, when the bit-depth selector is set to
+> 16-bit, encodes a **16-bit grayscale PNG** via `fast-png`
+> ([heightmapPng.ts](src/components/pages/Generator/CanvasSection/utils/heightmapPng.ts))
+> on download. 8-bit download is unchanged (visible canvas, respects preview);
+> 16-bit always exports the height map from the float buffer (independent of
+> preview/inversion). Verified end-to-end in-browser (valid 16-bit grayscale PNG:
+> depth 16, color type 0) and by unit test (smooth ramp round-trips to >256
+> distinct levels — real precision, no 8-bit banding).
+>
+> **Opaque-output fix.** `toRGBA()` now forces **alpha = 255**. A height map has
+> no transparency — alpha is only a compositing intermediary, and modes like `xor`
+> reduce it (a heavy-`xor` render had ~95% of pixels at alpha < 255). Previously
+> the 8-bit export carried that alpha (RGBA) while the 16-bit export was opaque
+> grayscale, so the two files looked different in a viewer. Emitting the value
+> opaque makes the on-screen display, the 8-bit export, and the 16-bit export all
+> consistent.
 >
 > **Phase D result (Worker + allocation fix):** the render now runs in a Web
 > Worker via a synchronous `drawSync` core, off the main thread. A **2048² render
@@ -214,8 +234,9 @@ Correctness phases (in order):
   sprites.) Runs on the main thread with the existing rAF batching.
 - **Phase B ✅ DONE (visual check pending)** — Sprites in the float pipeline via
   offscreen-canvas rasterization + float blend.
-- **Phase C** — Export: 8 / 16-bit PNG + 32-bit float (raw first, EXR/TIFF later) +
-  a bit-depth/format selector in the UI.
+- **Phase C (in progress)** — Export off the float buffer:
+  - ✅ 16-bit grayscale PNG height export (`fast-png`) + an 8/16-bit selector.
+  - ⬜ 32-bit float export (raw `.r32` first, then EXR/TIFF) + a format selector.
 
 Later — performance stage (only after Phases 0–C are correct and verified):
 
@@ -237,9 +258,57 @@ Later — performance stage (only after Phases 0–C are correct and verified):
     4. Main thread `putImageData`s the result; `worker.onerror` resets state.
        (Progress messages are posted but not yet shown — a progress bar is a small
        follow-up.)
+  - ✅ Progress UI — the Worker's `onProgress` messages drive a determinate
+    progress bar + animated "Rendering NN%" indicator in the canvas overlay
+    ([Canvas.tsx](src/components/pages/Generator/CanvasSection/Canvas/Canvas.tsx)).
+    Verified smooth 0→100% on a multi-second render.
   - ⬜ Tiling / further optimization only if a larger resolution needs it (8192²
     not yet profiled post-Worker).
-  - ⬜ Optional: surface a progress bar from the chunked `onProgress` messages.
+  - ⬜ **Optional later — "live forming" preview (cheap hybrid).** In addition to
+    the progress bar, paint **2–3 coarse intermediate frames** (e.g. at ~33% and
+    ~66%): inside `onProgress` at those thresholds, the Worker quantizes the float
+    buffer to RGBA and `postMessage`s a _copy_ (it can't transfer the live
+    accumulation buffer) for the main thread to `putImageData`. Gives most of the
+    "watch it form" effect at a fraction of the cost of streaming every frame.
+    Must be throttled (and ideally downscaled) — a full 8192² snapshot+copy per
+    frame is ~268 MB and would slow the render, so cap it at a handful of paints.
+
+## Planned feature — Multi-map ZIP export (height + normal + color)
+
+> Status: **planned, not implemented.** Export-adjacent (overlaps Phase C).
+
+A single **"Export maps (.zip)"** action that produces height + normal + color
+PNGs in one zip, with a customizable filename, without disturbing the current
+on-screen preview.
+
+**Design:**
+
+1. **Retain rendered height pixels** — store the last-rendered RGBA (from the
+   Worker `done` message) in a ref, independent of preview state, so export always
+   derives from the true height map regardless of what preview is displayed.
+2. **Pure map transforms** — refactor the in-place `drawNormal`/`drawColor` preview
+   functions into pure `toNormalMap(heightRGBA,w,h)` / `toColorMap(heightRGBA,
+gradientRGBA,w,h)` reused by both preview and export (export runs offscreen).
+   **Fix the latent `w`/`h` indexing bug in `drawNormal`** during this refactor
+   (currently masked because the canvas is always square).
+3. **Encode + zip** — each map → `OffscreenCanvas` → `toBlob('image/png')` (native
+   8-bit, no encoder dep) → zip with **`fflate`** (tiny, recommended) → download.
+   Phase C synergy: height upgrades to 16-bit PNG once that lands; normal/color
+   stay 8-bit.
+4. **Filename scheme** — `{prefix}{base}{postfix}_{map}.png` (`map` ∈
+   height/normal/color); zip = `{prefix}{base}{postfix}.zip`. `base` defaults to the
+   current `DisplacementY_{W}x{H}_{datetime}`. Sanitize illegal chars.
+5. **UI** — new "Export maps (.zip)" button in the output row + a collapsible
+   "Export options" panel (prefix / base / postfix inputs, live filename preview,
+   per-map include checkboxes). Requires a new `Input` text UI primitive (none
+   exists yet).
+6. **Edge cases** — disabled when pristine; ensure gradient is populated for color;
+   at 8192² run async (optionally in a Worker) to avoid a main-thread stall.
+
+**Open decisions (defaults in bold):** zip lib **`fflate`** vs JSZip; maps
+**all-three default**, deselectable; persist filename prefs locally **(no for v1)**;
+derive from **8-bit canvas now**, defer float-quality normal + 16-bit height to
+Phase C.
 
 ## Testing
 

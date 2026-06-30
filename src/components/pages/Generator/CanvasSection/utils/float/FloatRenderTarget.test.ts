@@ -48,4 +48,16 @@ describe('FloatRenderTarget', () => {
     t.clearRect(0, 0, 2, 2);
     expect(t.heights.every((v) => v === 0)).toBe(true);
   });
+
+  it('toRGBA emits opaque grayscale (alpha forced to 255) so 8-bit matches 16-bit', () => {
+    const t = new FloatRenderTarget(2, 2);
+    t.fillStyle = 'rgb(100,100,100,0.5)'; // translucent fill → internal alpha < 1
+    t.fillRect(0, 0, 2, 2);
+    const rgba = t.toRGBA();
+    for (let i = 0; i < rgba.length; i += 4) {
+      expect(rgba[i]).toBe(rgba[i + 1]); // r === g
+      expect(rgba[i + 1]).toBe(rgba[i + 2]); // g === b (grayscale)
+      expect(rgba[i + 3]).toBe(255); // opaque
+    }
+  });
 });
