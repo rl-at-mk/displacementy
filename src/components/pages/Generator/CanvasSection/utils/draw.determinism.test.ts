@@ -1,6 +1,6 @@
-import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {createHash} from 'node:crypto';
-import {draw} from './draw';
+import {drawSync} from './draw';
 
 /**
  * Phase 0 — determinism guard for the rendering core.
@@ -70,98 +70,69 @@ class RecordingContext {
   }
 }
 
-const runTrace = (initialSeed: number): Promise<TraceEvent[]> =>
-  new Promise((resolve) => {
-    const ctx = new RecordingContext();
-    void draw({
-      ctx2d: ctx as unknown as CanvasRenderingContext2D,
-      onEnd: () => {
-        resolve(ctx.trace);
-      },
-      props: {
-        initialSeed,
-        iterations: 300,
-        backgroundBrightness: 30,
-        rectEnabled: true,
-        rectBrightness: [0, 255],
-        rectAlpha: [0, 128],
-        rectScale: 100,
-        gridEnabled: true,
-        gridBrightness: [0, 255],
-        gridAlpha: [0, 128],
-        gridScale: 100,
-        gridAmount: [1, 5],
-        gridGap: 20,
-        colsEnabled: true,
-        colsBrightness: [0, 255],
-        colsAlpha: [0, 128],
-        colsScale: 100,
-        colsAmount: [1, 5],
-        colsGap: 20,
-        rowsEnabled: true,
-        rowsBrightness: [0, 255],
-        rowsAlpha: [0, 128],
-        rowsScale: 100,
-        rowsAmount: [1, 5],
-        rowsGap: 20,
-        linesEnabled: true,
-        linesBrightness: [0, 255],
-        linesAlpha: [0, 128],
-        linesWidth: [1, 10],
-        spritesEnabled: false,
-        sprites: [],
-        spritesRotationEnabled: false,
-        seamlessTextureEnabled: false,
-        compositionModes: ['multiply', 'screen', 'overlay'],
-      },
-    });
+const runTrace = (initialSeed: number): TraceEvent[] => {
+  const ctx = new RecordingContext();
+  drawSync({
+    ctx2d: ctx as unknown as CanvasRenderingContext2D,
+    props: {
+      initialSeed,
+      iterations: 300,
+      backgroundBrightness: 30,
+      rectEnabled: true,
+      rectBrightness: [0, 255],
+      rectAlpha: [0, 128],
+      rectScale: 100,
+      gridEnabled: true,
+      gridBrightness: [0, 255],
+      gridAlpha: [0, 128],
+      gridScale: 100,
+      gridAmount: [1, 5],
+      gridGap: 20,
+      colsEnabled: true,
+      colsBrightness: [0, 255],
+      colsAlpha: [0, 128],
+      colsScale: 100,
+      colsAmount: [1, 5],
+      colsGap: 20,
+      rowsEnabled: true,
+      rowsBrightness: [0, 255],
+      rowsAlpha: [0, 128],
+      rowsScale: 100,
+      rowsAmount: [1, 5],
+      rowsGap: 20,
+      linesEnabled: true,
+      linesBrightness: [0, 255],
+      linesAlpha: [0, 128],
+      linesWidth: [1, 10],
+      spritesEnabled: false,
+      sprites: [],
+      spritesRotationEnabled: false,
+      seamlessTextureEnabled: false,
+      compositionModes: ['multiply', 'screen', 'overlay'],
+    },
   });
+  return ctx.trace;
+};
 
 const hashTrace = (trace: TraceEvent[]): string =>
   createHash('sha256').update(JSON.stringify(trace)).digest('hex');
 
-// `draw()` drives its loop through the global requestAnimationFrame. The test
-// runs in Node (no rAF), so provide a setTimeout-backed implementation.
-const glob = globalThis as unknown as {
-  requestAnimationFrame?: (cb: (time: number) => void) => number;
-  cancelAnimationFrame?: (id: number) => void;
-};
-let origRAF: typeof glob.requestAnimationFrame;
-let origCAF: typeof glob.cancelAnimationFrame;
-
-beforeAll(() => {
-  origRAF = glob.requestAnimationFrame;
-  origCAF = glob.cancelAnimationFrame;
-  glob.requestAnimationFrame = (cb) =>
-    setTimeout(() => {
-      cb(0);
-    }, 0) as unknown as number;
-  glob.cancelAnimationFrame = (id) => {
-    clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
-  };
-});
-
-afterAll(() => {
-  glob.requestAnimationFrame = origRAF;
-  glob.cancelAnimationFrame = origCAF;
-});
-
 describe('draw determinism guard', () => {
-  it('produces an identical operation trace for the same seed', async () => {
-    const a = await runTrace(12345);
-    const b = await runTrace(12345);
+  it('produces an identical operation trace for the same seed', () => {
+    const a = runTrace(12345);
+    const b = runTrace(12345);
     expect(a.length).toBeGreaterThan(0);
     expect(hashTrace(a)).toBe(hashTrace(b));
   });
 
-  it('produces a different trace for a different seed', async () => {
-    const a = await runTrace(12345);
-    const b = await runTrace(67890);
+  it('produces a different trace for a different seed', () => {
+    const a = runTrace(12345);
+    const b = runTrace(67890);
     expect(hashTrace(a)).not.toBe(hashTrace(b));
   });
 
-  it('matches the recorded baseline trace', async () => {
-    const trace = await runTrace(12345);
+  it('matches the recorded baseline trace', () => {
+    const trace = runTrace(12345);
     expect({
       events: trace.length,
       hash: hashTrace(trace),

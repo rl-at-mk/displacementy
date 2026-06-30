@@ -1,8 +1,16 @@
 # Spec — CPU Float-Precision Rendering Core (for true 16-bit export)
 
-> Status: **Phases 0 + A + B implemented; Phase B visual check pending; Phases
-> C–D pending.** This is the active spec. (The prior parameter-locks spec was
-> fully implemented and removed; the code is its record.)
+> Status: **Phases 0 + A + B + D implemented and verified in-browser; Phase C
+> (high-bit-depth export) pending.** This is the active spec. (The prior
+> parameter-locks spec was fully implemented and removed; the code is its record.)
+>
+> **Phase D result (Worker + allocation fix):** the render now runs in a Web
+> Worker via a synchronous `drawSync` core, off the main thread. A **2048² render
+> with sprites completes in ~0.7s** (was >30s). Because the Worker uses no
+> `requestAnimationFrame`, it also runs in a hidden/background tab — which
+> restored end-to-end browser verification. Sprites render correctly through the
+> float pipeline (verified: full-range output, 248 distinct levels). Determinism
+> guard hash is **unchanged** (the sync refactor preserved the exact op sequence).
 >
 > **Phase B note — sprites.** `FloatRenderTarget` implements
 > `translate`/`rotate`/`drawImage` by forwarding the transform to a reusable
@@ -218,23 +226,20 @@ Later — performance stage (only after Phases 0–C are correct and verified):
   - ✅ `FloatRenderTarget` made Worker-safe — sprite rasterization uses
     `OffscreenCanvas` (no `document`), and `drawImage` already accepts
     `ImageBitmap`.
-  - ⬜ Move the render into a **Web Worker** (the big step). Plan:
-    1. Refactor the draw loop into a **synchronous** core (plain for-loop +
-       `onProgress`, no `requestAnimationFrame`) so it runs in a Worker. The op
-       sequence is unchanged → the determinism-guard hash must stay identical.
-       (Do not ship this on the main thread alone — a synchronous loop there would
-       freeze the UI; it must land together with the Worker.)
-    2. Main thread: rasterize the SVG sprites to transferable `ImageBitmap`s and
-       post `{props, spriteBitmaps, width, height}` to the Worker.
-    3. Worker: run the sync core into the float buffer, post chunked progress, and
-       transfer back the 8-bit RGBA (and later the float buffer for export).
-    4. Main thread: `putImageData` the result to the visible canvas; drive a
-       progress bar from the chunked messages.
-  - ⬜ Tiling only if the memory/throughput budget still requires it.
-  - **Bonus insight:** a Worker render does **not** use `requestAnimationFrame`,
-    so it is not subject to the hidden-tab rAF pause that blocked in-browser
-    verification — the Worker route should also make end-to-end verification work
-    again.
+  - ✅ Moved the render into a **Web Worker**:
+    1. `drawSync` — synchronous core (for-loop + `onProgress`, no rAF). Op
+       sequence unchanged → determinism-guard hash identical.
+    2. Main thread rasterizes SVG sprites to transferable `ImageBitmap`s
+       (`createImageBitmap` with explicit resize — it **rejects** on SVGs without
+       it) and posts `{props, width, height}` (sprites transferred) to the Worker.
+    3. Worker (`renderWorker.ts`) runs `drawSync` into the float buffer (sprites
+       via `OffscreenCanvas`), then transfers back the 8-bit RGBA.
+    4. Main thread `putImageData`s the result; `worker.onerror` resets state.
+       (Progress messages are posted but not yet shown — a progress bar is a small
+       follow-up.)
+  - ⬜ Tiling / further optimization only if a larger resolution needs it (8192²
+    not yet profiled post-Worker).
+  - ⬜ Optional: surface a progress bar from the chunked `onProgress` messages.
 
 ## Testing
 

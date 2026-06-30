@@ -188,19 +188,22 @@ export class FloatRenderTarget {
     return this.#value;
   }
 
-  /** Quantize to straight 8-bit RGBA and paint into the visible 2D canvas. */
-  blitTo(ctx2d: CanvasRenderingContext2D): void {
-    const img = ctx2d.createImageData(this.#w, this.#h);
-    const d = img.data;
+  /**
+   * Quantize the float buffer to straight 8-bit RGBA. Returned as a
+   * `Uint8ClampedArray` whose buffer can be transferred from the Worker to the
+   * main thread and wrapped in `ImageData` for `putImageData`.
+   */
+  toRGBA(): Uint8ClampedArray {
+    const out = new Uint8ClampedArray(this.#w * this.#h * 4);
     for (let i = 0; i < this.#value.length; i++) {
       const g = Math.round(this.#value[i] * 255);
       const o = i * 4;
-      d[o] = g;
-      d[o + 1] = g;
-      d[o + 2] = g;
-      d[o + 3] = Math.round(this.#alpha[i] * 255);
+      out[o] = g;
+      out[o + 1] = g;
+      out[o + 2] = g;
+      out[o + 3] = Math.round(this.#alpha[i] * 255);
     }
-    ctx2d.putImageData(img, 0, 0);
+    return out;
   }
 
   #clip(

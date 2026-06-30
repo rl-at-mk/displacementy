@@ -7,8 +7,8 @@ import {SectionTitle} from '../SectionTitle';
 import {Canvas} from './Canvas';
 import {Gradient} from './Gradient';
 import {SubSection} from './SubSection';
-import {draw} from './utils/draw';
-import {FloatRenderTarget} from './utils/float/FloatRenderTarget';
+import {loadSprites, type DrawProps} from './utils/draw';
+import {type RenderRequest, type RenderResponse} from './utils/renderWorker';
 import {drawNormal} from './utils/drawNormal';
 import {drawColor} from './utils/drawColor';
 import {drawInvert} from './utils/drawInvert';
@@ -39,106 +39,108 @@ export function CanvasSection() {
     setPreviewType('original');
 
     const ctx2d = getCtx2dFromRef(canvasRef);
+    const state = useStore.getState();
 
-    const {
-      initialSeed,
-      iterations,
-      backgroundBrightness,
-      rectEnabled,
-      rectBrightness,
-      rectAlpha,
-      rectScale,
-      gridEnabled,
-      gridBrightness,
-      gridAlpha,
-      gridScale,
-      gridAmount,
-      gridGap,
-      colsEnabled,
-      colsBrightness,
-      colsAlpha,
-      colsScale,
-      colsAmount,
-      colsGap,
-      rowsEnabled,
-      rowsBrightness,
-      rowsAlpha,
-      rowsScale,
-      rowsAmount,
-      rowsGap,
-      linesEnabled,
-      linesBrightness,
-      linesAlpha,
-      linesWidth,
-      spritesEnabled,
-      spritesRotationEnabled,
-      getSprites,
-      compositionModes,
-      seamlessTextureEnabled,
-    } = useStore.getState();
+    void (async () => {
+      // Decode sprites to transferable ImageBitmaps on the main thread (the
+      // Worker has no DOM image loading), then hand the whole render off.
+      let sprites: ImageBitmap[] = [];
+      if (state.spritesEnabled) {
+        const loaded = await loadSprites(state.getSprites());
+        // Rasterize each sprite to a fixed square. We must draw the SVG onto a
+        // canvas first: `createImageBitmap()` called directly on a dimensionless
+        // SVG element yields a fully transparent bitmap (and sprites are drawn
+        // into a square anyway).
+        const spriteRasterSize = 512;
+        sprites = await Promise.all(
+          loaded.map(async (img) => {
+            const canvas = new OffscreenCanvas(
+              spriteRasterSize,
+              spriteRasterSize,
+            );
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, spriteRasterSize, spriteRasterSize);
+            return createImageBitmap(canvas);
+          }),
+        );
+      }
 
-    const sprites = getSprites();
-
-    // Accumulate in a 32-bit float buffer (the new core), then paint the
-    // quantized 8-bit result into the visible canvas. `draw()` is unchanged: the
-    // target implements the canvas subset it uses.
-    const target = new FloatRenderTarget(width, height);
-
-    void draw({
-      ctx2d: target as unknown as CanvasRenderingContext2D,
-      props: {
-        initialSeed,
-        iterations,
-        backgroundBrightness,
-        rectEnabled,
-        rectBrightness,
-        rectAlpha,
-        rectScale,
-        gridEnabled,
-        gridBrightness,
-        gridAlpha,
-        gridScale,
-        gridAmount,
-        gridGap,
-        colsEnabled,
-        colsBrightness,
-        colsAlpha,
-        colsScale,
-        colsAmount,
-        colsGap,
-        rowsEnabled,
-        rowsBrightness,
-        rowsAlpha,
-        rowsScale,
-        rowsAmount,
-        rowsGap,
-        linesEnabled,
-        linesBrightness,
-        linesAlpha,
-        linesWidth,
-        spritesEnabled,
-        spritesRotationEnabled,
+      const props: DrawProps = {
+        initialSeed: state.initialSeed,
+        iterations: state.iterations,
+        backgroundBrightness: state.backgroundBrightness,
+        rectEnabled: state.rectEnabled,
+        rectBrightness: state.rectBrightness,
+        rectAlpha: state.rectAlpha,
+        rectScale: state.rectScale,
+        gridEnabled: state.gridEnabled,
+        gridBrightness: state.gridBrightness,
+        gridAlpha: state.gridAlpha,
+        gridScale: state.gridScale,
+        gridAmount: state.gridAmount,
+        gridGap: state.gridGap,
+        colsEnabled: state.colsEnabled,
+        colsBrightness: state.colsBrightness,
+        colsAlpha: state.colsAlpha,
+        colsScale: state.colsScale,
+        colsAmount: state.colsAmount,
+        colsGap: state.colsGap,
+        rowsEnabled: state.rowsEnabled,
+        rowsBrightness: state.rowsBrightness,
+        rowsAlpha: state.rowsAlpha,
+        rowsScale: state.rowsScale,
+        rowsAmount: state.rowsAmount,
+        rowsGap: state.rowsGap,
+        linesEnabled: state.linesEnabled,
+        linesBrightness: state.linesBrightness,
+        linesAlpha: state.linesAlpha,
+        linesWidth: state.linesWidth,
+        spritesEnabled: state.spritesEnabled,
         sprites,
-        compositionModes,
-        seamlessTextureEnabled,
-      },
-      onEnd(renderTimeMs) {
-        // Paint the float buffer into the visible 8-bit canvas.
-        target.blitTo(ctx2d);
+        spritesRotationEnabled: state.spritesRotationEnabled,
+        seamlessTextureEnabled: state.seamlessTextureEnabled,
+        compositionModes: state.compositionModes,
+      };
 
-        // Set minumum "visible" render time to prevent very fast component updates (i.e., flickering)
+      // Run the deterministic CPU-float core off the main thread.
+      const renderStartTimeMs = performance.now();
+      const worker = new Worker(
+        new URL('./utils/renderWorker.ts', import.meta.url),
+        {type: 'module'},
+      );
+      worker.onmessage = (event: MessageEvent<RenderResponse>) => {
+        const message = event.data;
+        if (message.type !== 'done') return; // progress messages: unused for now
+
+        ctx2d.putImageData(
+          new ImageData(message.rgba, message.width, message.height),
+          0,
+          0,
+        );
+        worker.terminate();
+
+        // Minimum "visible" render time to prevent flickering on fast renders.
         const minimumTimeBetweenUpdatesMs = 200;
-        const update = () => {
-          setIsRendering(false);
-        };
-
+        const renderTimeMs = performance.now() - renderStartTimeMs;
         if (renderTimeMs < minimumTimeBetweenUpdatesMs) {
-          setTimeout(update, minimumTimeBetweenUpdatesMs - renderTimeMs);
+          setTimeout(
+            () => setIsRendering(false),
+            minimumTimeBetweenUpdatesMs - renderTimeMs,
+          );
         } else {
-          update();
+          setIsRendering(false);
         }
-      },
-    });
+      };
+
+      worker.onerror = (event) => {
+        worker.terminate();
+        setIsRendering(false);
+        throw new Error(`Render worker failed: ${event.message}`);
+      };
+
+      const request: RenderRequest = {props, width, height};
+      worker.postMessage(request, sprites);
+    })();
   };
 
   const download = () => {

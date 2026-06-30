@@ -1,5 +1,4 @@
 import {type NumberDual} from '@/types';
-import {animateWithSubIterations} from '@/utils/animationFrame';
 import {degreesToRadians} from '@/utils/math';
 import {xxx, xxxa} from '@/utils/colors';
 import {
@@ -12,10 +11,64 @@ import {getCanvasDimensions} from './getCanvasDimensions';
 import {clearCanvas} from './clearCanvas';
 import {type CompositionMode} from '../../constants';
 
-export const draw = async ({
+/** A decoded, ready-to-draw sprite. An `ImageBitmap` so the core runs in a Worker. */
+export type Sprite = ImageBitmap;
+
+export type DrawProps = {
+  initialSeed: number;
+  iterations: number;
+  backgroundBrightness: number;
+  rectEnabled: boolean;
+  rectBrightness: NumberDual;
+  rectAlpha: NumberDual;
+  rectScale: number;
+  gridEnabled: boolean;
+  gridBrightness: NumberDual;
+  gridAlpha: NumberDual;
+  gridScale: number;
+  gridAmount: NumberDual;
+  gridGap: number;
+  colsEnabled: boolean;
+  colsBrightness: NumberDual;
+  colsAlpha: NumberDual;
+  colsScale: number;
+  colsAmount: NumberDual;
+  colsGap: number;
+  rowsEnabled: boolean;
+  rowsBrightness: NumberDual;
+  rowsAlpha: NumberDual;
+  rowsScale: number;
+  rowsAmount: NumberDual;
+  rowsGap: number;
+  linesEnabled: boolean;
+  linesBrightness: NumberDual;
+  linesAlpha: NumberDual;
+  linesWidth: NumberDual;
+  spritesEnabled: boolean;
+  sprites: Sprite[];
+  spritesRotationEnabled: boolean;
+  seamlessTextureEnabled: boolean;
+  compositionModes: CompositionMode[];
+};
+
+/**
+ * Synchronous render core. Runs the full deterministic generation loop into the
+ * given target — a real 2D context, the float target, or a recording stub. It
+ * uses NO `requestAnimationFrame`, so it can run inside a Web Worker (where
+ * blocking is fine); coarse progress is reported via `onProgress`. The op
+ * sequence is identical to the previous rAF-batched renderer, so the determinism
+ * guard hash is unchanged.
+ */
+export const drawSync = ({
   ctx2d,
-  onEnd,
-  props: {
+  props,
+  onProgress,
+}: {
+  ctx2d: CanvasRenderingContext2D;
+  props: DrawProps;
+  onProgress?: (fraction: number) => void;
+}): void => {
+  const {
     initialSeed,
     iterations,
     backgroundBrightness,
@@ -46,146 +99,99 @@ export const draw = async ({
     linesAlpha,
     linesWidth,
     spritesEnabled,
-    sprites: _sprites,
+    sprites,
     spritesRotationEnabled,
     seamlessTextureEnabled,
     compositionModes,
-  },
-}: {
-  ctx2d: CanvasRenderingContext2D;
-  onEnd: (renderTimeMs: number) => void;
-  props: {
-    initialSeed: number;
-    iterations: number;
-    backgroundBrightness: number;
-    rectEnabled: boolean;
-    rectBrightness: NumberDual;
-    rectAlpha: NumberDual;
-    rectScale: number;
-    gridEnabled: boolean;
-    gridBrightness: NumberDual;
-    gridAlpha: NumberDual;
-    gridScale: number;
-    gridAmount: NumberDual;
-    gridGap: number;
-    colsEnabled: boolean;
-    colsBrightness: NumberDual;
-    colsAlpha: NumberDual;
-    colsScale: number;
-    colsAmount: NumberDual;
-    colsGap: number;
-    rowsEnabled: boolean;
-    rowsBrightness: NumberDual;
-    rowsAlpha: NumberDual;
-    rowsScale: number;
-    rowsAmount: NumberDual;
-    rowsGap: number;
-    linesEnabled: boolean;
-    linesBrightness: NumberDual;
-    linesAlpha: NumberDual;
-    linesWidth: NumberDual;
-    spritesEnabled: boolean;
-    sprites: HTMLImageElement[];
-    spritesRotationEnabled: boolean;
-    seamlessTextureEnabled: boolean;
-    compositionModes: CompositionMode[];
-  };
-}): Promise<void> => {
-  const renderStartTimeMs = performance.now();
+  } = props;
 
   setSeed(initialSeed);
   clearCanvas(ctx2d);
-
   drawBackground({ctx2d, backgroundBrightness});
 
   const originalCompositeOperation = ctx2d.globalCompositeOperation;
 
-  const sprites = spritesEnabled ? await loadSprites(_sprites) : [];
+  // Report progress every Nth iteration (no canvas op, so the op trace is
+  // unaffected).
+  const progressEvery = 64;
 
-  animateWithSubIterations({
-    iterations,
-    iterationsPerFrame: 50,
-    callback() {
-      const compositionMode = randomItem(compositionModes);
-      if (compositionMode) {
-        ctx2d.globalCompositeOperation = compositionMode;
-      }
+  for (let iteration = 0; iteration < iterations; iteration++) {
+    const compositionMode = randomItem(compositionModes);
+    if (compositionMode) {
+      ctx2d.globalCompositeOperation = compositionMode;
+    }
 
-      switch (randomInteger(0, 5)) {
-        case 0:
-          if (!rectEnabled) break;
-          drawRect({
-            ctx2d,
-            rectBrightness,
-            rectAlpha,
-            rectScale,
-            seamlessTextureEnabled,
-          });
-          break;
-        case 1:
-          if (!gridEnabled) break;
-          drawGrid({
-            ctx2d,
-            gridBrightness,
-            gridAlpha,
-            gridScale,
-            gridAmount,
-            gridGap,
-            seamlessTextureEnabled,
-          });
-          break;
-        case 2:
-          if (!colsEnabled) break;
-          drawCols({
-            ctx2d,
-            colsBrightness,
-            colsAlpha,
-            colsScale,
-            colsAmount,
-            colsGap,
-            seamlessTextureEnabled,
-          });
-          break;
-        case 3:
-          if (!rowsEnabled) break;
-          drawRows({
-            ctx2d,
-            rowsBrightness,
-            rowsAlpha,
-            rowsScale,
-            rowsAmount,
-            rowsGap,
-            seamlessTextureEnabled,
-          });
-          break;
-        case 4:
-          if (!linesEnabled) break;
-          drawLines({
-            ctx2d,
-            linesBrightness,
-            linesAlpha,
-            linesWidth,
-          });
-          break;
-        case 5:
-          if (!spritesEnabled) break;
-          drawSprite({
-            ctx2d,
-            sprites,
-            spritesRotationEnabled,
-            seamlessTextureEnabled,
-          });
-          break;
-        default:
-          break;
-      }
-    },
-    onEnd() {
-      ctx2d.globalCompositeOperation = originalCompositeOperation;
-      const renderTimeMs = performance.now() - renderStartTimeMs;
-      onEnd(renderTimeMs);
-    },
-  });
+    switch (randomInteger(0, 5)) {
+      case 0:
+        if (!rectEnabled) break;
+        drawRect({
+          ctx2d,
+          rectBrightness,
+          rectAlpha,
+          rectScale,
+          seamlessTextureEnabled,
+        });
+        break;
+      case 1:
+        if (!gridEnabled) break;
+        drawGrid({
+          ctx2d,
+          gridBrightness,
+          gridAlpha,
+          gridScale,
+          gridAmount,
+          gridGap,
+          seamlessTextureEnabled,
+        });
+        break;
+      case 2:
+        if (!colsEnabled) break;
+        drawCols({
+          ctx2d,
+          colsBrightness,
+          colsAlpha,
+          colsScale,
+          colsAmount,
+          colsGap,
+          seamlessTextureEnabled,
+        });
+        break;
+      case 3:
+        if (!rowsEnabled) break;
+        drawRows({
+          ctx2d,
+          rowsBrightness,
+          rowsAlpha,
+          rowsScale,
+          rowsAmount,
+          rowsGap,
+          seamlessTextureEnabled,
+        });
+        break;
+      case 4:
+        if (!linesEnabled) break;
+        drawLines({ctx2d, linesBrightness, linesAlpha, linesWidth});
+        break;
+      case 5:
+        if (!spritesEnabled) break;
+        drawSprite({
+          ctx2d,
+          sprites,
+          spritesRotationEnabled,
+          seamlessTextureEnabled,
+        });
+        break;
+      default:
+        break;
+    }
+
+    if (onProgress && iteration % progressEvery === 0) {
+      onProgress(iteration / iterations);
+    }
+  }
+
+  ctx2d.globalCompositeOperation = originalCompositeOperation;
+  onProgress?.(1);
 };
 
 const drawSeamless = ({
@@ -494,13 +500,12 @@ const drawSprite = ({
   seamlessTextureEnabled,
 }: {
   ctx2d: CanvasRenderingContext2D;
-  sprites: HTMLImageElement[];
+  sprites: Sprite[];
   spritesRotationEnabled: boolean;
   seamlessTextureEnabled: boolean;
 }): void => {
   const sprite = randomItem(sprites);
   if (!sprite) return;
-  if (!sprite.complete) return;
 
   const {w, h} = getCanvasDimensions(ctx2d);
   const size = randomInteger(Math.round(w / 32), Math.round(w / 2));
@@ -529,7 +534,7 @@ const drawSprite = ({
   if (spritesRotationEnabled) rotateEnd({ctx2d, angleDegrees});
 };
 
-const loadSprites = async (
+export const loadSprites = async (
   sprites: HTMLImageElement[],
 ): Promise<HTMLImageElement[]> => {
   const promises: Array<Promise<HTMLImageElement | undefined>> = [];
