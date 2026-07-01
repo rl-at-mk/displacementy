@@ -17,6 +17,8 @@ export type BuildMapsZipParams = {
   depths: Record<string, MapDepth>;
   /** Param values per map key (e.g. `{normal: {strength: 1}}`). */
   params: Record<string, Record<string, number>>;
+  /** Whether the height buffer tiles seamlessly (wraps edge sampling). */
+  seamless: boolean;
   /** Per-map member filename stem (no extension), keyed by map key. */
   memberNames: Record<string, string>;
   /** Coarse per-stage progress in `0..1` (drives the shared progress bar). */
@@ -38,6 +40,7 @@ export const buildMapsZip = ({
   include,
   depths,
   params,
+  seamless,
   memberNames,
   onProgress,
 }: BuildMapsZipParams): Uint8Array => {
@@ -48,7 +51,14 @@ export const buildMapsZip = ({
   included.forEach((map, i) => {
     const depth = depths[map.key];
     const data = map.derive(
-      {heights, width, height, palette, params: params[map.key] ?? {}},
+      {
+        heights,
+        width,
+        height,
+        palette,
+        params: params[map.key] ?? {},
+        seamless,
+      },
       depth,
     );
     files[`${memberNames[map.key]}.png`] = encode({

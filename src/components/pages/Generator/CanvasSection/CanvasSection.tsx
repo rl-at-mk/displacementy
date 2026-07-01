@@ -123,8 +123,10 @@ export function CanvasSection() {
   const gradientCanvasRef = useRef<HTMLCanvasElement>(null);
   // The most recent render's float height buffer, retained for high-bit-depth
   // export. Independent of preview state; invalidated on resolution change.
+  // `seamless` records whether that render tiled (so derived maps wrap to match).
   const lastHeightsRef = useRef<
-    {data: Float32Array; width: number; height: number} | undefined
+    | {data: Float32Array; width: number; height: number; seamless: boolean}
+    | undefined
   >(undefined);
 
   const render = () => {
@@ -210,11 +212,13 @@ export function CanvasSection() {
           return;
         }
 
-        // Retain the float height buffer for high-bit-depth export.
+        // Retain the float height buffer for high-bit-depth export, tagged with
+        // the seamless flag this render used so derived maps can match it.
         lastHeightsRef.current = {
           data: message.heights,
           width: message.width,
           height: message.height,
+          seamless: state.seamlessTextureEnabled,
         };
 
         ctx2d.putImageData(
@@ -303,7 +307,7 @@ export function CanvasSection() {
   const exportMaps = () => {
     const heightmap = lastHeightsRef.current;
     if (!heightmap) return;
-    const {data: heights, width: w, height: h} = heightmap;
+    const {data: heights, width: w, height: h, seamless} = heightmap;
 
     // Read the gradient palette (top row) on the main thread — the Worker has no
     // DOM canvas — and pass it along.
@@ -355,6 +359,7 @@ export function CanvasSection() {
       include: includeMaps,
       depths: mapRecord(resolveDepth),
       params: mapParams,
+      seamless,
       memberNames: mapRecord((map) => memberName(map.key)),
     };
     worker.postMessage(request, [heightsCopy.buffer, palette.buffer]);
@@ -405,7 +410,7 @@ export function CanvasSection() {
         const heightmap = lastHeightsRef.current;
         const descriptor = getMap(key);
         if (heightmap && descriptor.previewRGBA) {
-          const {data, width: w, height: h} = heightmap;
+          const {data, width: w, height: h, seamless} = heightmap;
           const gradientCtx = getCtx2dFromRef(gradientCanvasRef);
           const {w: gradientWidth} = getCanvasDimensions(gradientCtx);
           const palette = paletteFromRowRGBA(
@@ -417,6 +422,7 @@ export function CanvasSection() {
             height: h,
             palette,
             params: mapParams[key],
+            seamless,
           });
           ctx2d.putImageData(new ImageData(rgba, w, h), 0, 0);
         }

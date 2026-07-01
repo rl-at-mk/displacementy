@@ -490,6 +490,18 @@ sweep to a tunable **radius**, scaled by **strength**; grayscale 8-bit. Off by d
 ≤2048 compute size (radius scaled to match), runs HBAO there, then bilinearly upscales
 to full res — **8192² 4-map export dropped from ~57s → ~9s**, visually ~identical.
 
+**Seamless tiling (normal + AO).** When seamless-texture mode is on the height buffer
+tiles, so the derived maps must too — but Sobel/HBAO neighbor sampling was clamping at
+edges, breaking the seam. Fixed via a shared
+[sampleHeights.ts](src/components/pages/Generator/CanvasSection/utils/maps/sampleHeights.ts)
+sampler that **wraps** when seamless (the AO downsample's bilinear upscale wraps too).
+The seamless flag is captured **at render time** into `lastHeightsRef` (so it matches
+the buffer even if the toggle changes afterward) and threaded through `MapContext`.
+Height (the buffer itself) and color (per-pixel LUT) tile inherently. Verified by
+shift-equivariance unit tests (`AO(roll(h)) === roll(AO(h))` under wrap, and the
+inverse under clamp) **and** live: on a seamless 2048² render, wrap-seam mean |Δ| vs
+interior was 0.45/1.99 (AO) and 0.02/1.89 (normal) — no seam.
+
 **Still future (unbuilt).** More derived maps — **roughness / specular / metalness**
 (LUT remaps of height/slope, reusing the color-map LUT machinery), **curvature**, etc.
 Each is now just a new registry entry (pure fn + params); the pipeline, UI, filenames,

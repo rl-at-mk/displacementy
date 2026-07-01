@@ -38,12 +38,12 @@ export const MAP_REGISTRY: MapDescriptor[] = [
         default: 1,
       },
     ],
-    derive: ({heights, width, height, params}, depth) =>
+    derive: ({heights, width, height, params, seamless}, depth) =>
       depth === 16
-        ? toNormalMapRGB16(heights, width, height, params.strength)
-        : toNormalMapRGB8(heights, width, height, params.strength),
-    previewRGBA: ({heights, width, height, params}) =>
-      toNormalMapRGBA(heights, width, height, params.strength),
+        ? toNormalMapRGB16(heights, width, height, params.strength, seamless)
+        : toNormalMapRGB8(heights, width, height, params.strength, seamless),
+    previewRGBA: ({heights, width, height, params, seamless}) =>
+      toNormalMapRGBA(heights, width, height, params.strength, seamless),
   },
   {
     key: 'color',
@@ -76,10 +76,24 @@ export const MAP_REGISTRY: MapDescriptor[] = [
         default: 1,
       },
     ],
-    derive: ({heights, width, height, params}) =>
-      toAO8Auto(heights, width, height, params.radius, params.strength),
-    previewRGBA: ({heights, width, height, params}) =>
-      toAORGBA(heights, width, height, params.radius, params.strength),
+    derive: ({heights, width, height, params, seamless}) =>
+      toAO8Auto(
+        heights,
+        width,
+        height,
+        params.radius,
+        params.strength,
+        seamless,
+      ),
+    previewRGBA: ({heights, width, height, params, seamless}) =>
+      toAORGBA(
+        heights,
+        width,
+        height,
+        params.radius,
+        params.strength,
+        seamless,
+      ),
   },
 ];
 

@@ -9,25 +9,16 @@
  * normal (hence AO is off by default in the export UI).
  */
 
+import {makeHeightSampler} from './sampleHeights';
+
 const DIRECTIONS = 8;
 const STEPS = 8;
 
-const sampleClamped = (
-  heights: Float32Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-): number => {
-  const cx = x < 0 ? 0 : x >= width ? width - 1 : x;
-  const cy = y < 0 ? 0 : y >= height ? height - 1 : y;
-  return heights[cy * width + cx];
-};
-
 /**
  * Compute the AO map (1 channel, 8-bit). `radius` is the sampling reach in
- * pixels; `strength` scales the occlusion (0 = none). Returns `Uint8Array` of
- * length `width * height`.
+ * pixels; `strength` scales the occlusion (0 = none); `seamless` wraps edge
+ * sampling so a tiling height map yields a tiling AO map. Returns `Uint8Array`
+ * of length `width * height`.
  */
 export const toAO8 = (
   heights: Float32Array,
@@ -35,9 +26,11 @@ export const toAO8 = (
   height: number,
   radius: number,
   strength: number,
+  seamless = false,
 ): Uint8Array => {
   const out = new Uint8Array(width * height);
   const angleStep = (Math.PI * 2) / DIRECTIONS;
+  const sample = makeHeightSampler(heights, width, height, seamless);
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -53,10 +46,7 @@ export const toAO8 = (
         let horizon = 0;
         for (let s = 1; s <= STEPS; s++) {
           const dist = (s / STEPS) * radius;
-          const hs = sampleClamped(
-            heights,
-            width,
-            height,
+          const hs = sample(
             Math.round(x + dx * dist),
             Math.round(y + dy * dist),
           );
@@ -111,36 +101,64 @@ const downsampleHeights = (
   return {data, width: sw, height: sh};
 };
 
-/** Bilinearly upscale a grayscale map from (sw×sh) to (dw×dh). */
+/**
+ * Bilinearly upscale a grayscale map from (sw×sh) to (dw×dh). When `seamless`,
+ * edge samples wrap to the opposite edge so the upscaled map still tiles.
+ */
 const upscaleGray = (
   src: Uint8Array,
   sw: number,
   sh: number,
   dw: number,
   dh: number,
+  seamless: boolean,
 ): Uint8Array => {
   const out = new Uint8Array(dw * dh);
   const scaleX = sw / dw;
   const scaleY = sh / dh;
+  const wrap = (v: number, n: number): number => {
+    const m = v % n;
+    return m < 0 ? m + n : m;
+  };
   for (let y = 0; y < dh; y++) {
-    let fy = (y + 0.5) * scaleY - 0.5;
-    fy = fy < 0 ? 0 : fy > sh - 1 ? sh - 1 : fy;
-    const y0 = Math.floor(fy);
-    const y1 = Math.min(y0 + 1, sh - 1);
-    const wy = fy - y0;
+    const fy = (y + 0.5) * scaleY - 0.5;
+    let y0: number;
+    let y1: number;
+    let wyf: number;
+    if (seamless) {
+      const f = Math.floor(fy);
+      wyf = fy - f;
+      y0 = wrap(f, sh);
+      y1 = wrap(f + 1, sh);
+    } else {
+      const cy = fy < 0 ? 0 : fy > sh - 1 ? sh - 1 : fy;
+      y0 = Math.floor(cy);
+      y1 = Math.min(y0 + 1, sh - 1);
+      wyf = cy - y0;
+    }
     for (let x = 0; x < dw; x++) {
-      let fx = (x + 0.5) * scaleX - 0.5;
-      fx = fx < 0 ? 0 : fx > sw - 1 ? sw - 1 : fx;
-      const x0 = Math.floor(fx);
-      const x1 = Math.min(x0 + 1, sw - 1);
-      const wx = fx - x0;
+      const fx = (x + 0.5) * scaleX - 0.5;
+      let x0: number;
+      let x1: number;
+      let wxf: number;
+      if (seamless) {
+        const f = Math.floor(fx);
+        wxf = fx - f;
+        x0 = wrap(f, sw);
+        x1 = wrap(f + 1, sw);
+      } else {
+        const cx = fx < 0 ? 0 : fx > sw - 1 ? sw - 1 : fx;
+        x0 = Math.floor(cx);
+        x1 = Math.min(x0 + 1, sw - 1);
+        wxf = cx - x0;
+      }
       const a = src[y0 * sw + x0];
       const b = src[y0 * sw + x1];
       const c = src[y1 * sw + x0];
       const d = src[y1 * sw + x1];
-      const top = a + (b - a) * wx;
-      const bot = c + (d - c) * wx;
-      out[y * dw + x] = Math.round(top + (bot - top) * wy);
+      const top = a + (b - a) * wxf;
+      const bot = c + (d - c) * wxf;
+      out[y * dw + x] = Math.round(top + (bot - top) * wyf);
     }
   }
   return out;
@@ -151,7 +169,8 @@ const upscaleGray = (
  * constant, so above {@link AO_COMPUTE_CAP} we box-average the heights down,
  * compute AO there (radius scaled to match), then bilinearly upscale. AO is
  * low-frequency, so the result is visually ~identical at a fraction of the cost
- * (e.g. 8192² drops from ~50s to a few seconds).
+ * (e.g. 8192² drops from ~50s to a few seconds). `seamless` wraps sampling in
+ * both the AO pass and the upscale so a tiling height map yields a tiling AO.
  */
 export const toAO8Auto = (
   heights: Float32Array,
@@ -159,9 +178,11 @@ export const toAO8Auto = (
   height: number,
   radius: number,
   strength: number,
+  seamless = false,
 ): Uint8Array => {
   const factor = Math.ceil(Math.max(width, height) / AO_COMPUTE_CAP);
-  if (factor <= 1) return toAO8(heights, width, height, radius, strength);
+  if (factor <= 1)
+    return toAO8(heights, width, height, radius, strength, seamless);
 
   const small = downsampleHeights(heights, width, height, factor);
   const smallAO = toAO8(
@@ -170,8 +191,16 @@ export const toAO8Auto = (
     small.height,
     Math.max(1, radius / factor),
     strength,
+    seamless,
   );
-  return upscaleGray(smallAO, small.width, small.height, width, height);
+  return upscaleGray(
+    smallAO,
+    small.width,
+    small.height,
+    width,
+    height,
+    seamless,
+  );
 };
 
 /** Preview adapter: AO expanded to opaque grayscale RGBA. */
@@ -181,8 +210,9 @@ export const toAORGBA = (
   height: number,
   radius: number,
   strength: number,
+  seamless = false,
 ): Uint8ClampedArray => {
-  const gray = toAO8Auto(heights, width, height, radius, strength);
+  const gray = toAO8Auto(heights, width, height, radius, strength, seamless);
   const rgba = new Uint8ClampedArray(width * height * 4);
   for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
     rgba[p] = gray[i];

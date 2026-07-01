@@ -25,6 +25,7 @@ describe('MAP_REGISTRY', () => {
       height: h,
       palette: new Uint8Array([0, 0, 0, 255, 255, 255]),
       params: {strength: 1, radius: 8},
+      seamless: false,
     };
     for (const map of MAP_REGISTRY) {
       const px8 = map.derive(ctx, 8);

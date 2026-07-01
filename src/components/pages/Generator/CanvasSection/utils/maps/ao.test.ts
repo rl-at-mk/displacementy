@@ -65,6 +65,41 @@ describe('toAO8Auto', () => {
   });
 });
 
+// Horizontal roll: for a tiling map, a wrap-based derivation must be
+// shift-equivariant — AO(roll(h)) === roll(AO(h)). Clamped edges break this.
+const rollX = <T extends Float32Array | Uint8Array>(
+  a: T,
+  w: number,
+  h: number,
+  dx: number,
+): T => {
+  const out = new (a.constructor as new (n: number) => T)(a.length);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) out[y * w + ((x + dx) % w)] = a[y * w + x];
+  return out;
+};
+
+describe('toAO8 seamless wrapping', () => {
+  const w = 24;
+  const h = 24;
+  const heights = new Float32Array(w * h);
+  // A ridge that straddles the wrap seam (dark near both x edges).
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) heights[y * w + x] = x < 4 || x >= 20 ? 0 : 1;
+
+  it('is shift-equivariant when seamless (so the AO tiles)', () => {
+    const ao = toAO8(heights, w, h, 6, 1, true);
+    const aoOfRolled = toAO8(rollX(heights, w, h, 12), w, h, 6, 1, true);
+    expect([...aoOfRolled]).toEqual([...rollX(ao, w, h, 12)]);
+  });
+
+  it('is NOT shift-equivariant when clamped (seam differs)', () => {
+    const ao = toAO8(heights, w, h, 6, 1, false);
+    const aoOfRolled = toAO8(rollX(heights, w, h, 12), w, h, 6, 1, false);
+    expect([...aoOfRolled]).not.toEqual([...rollX(ao, w, h, 12)]);
+  });
+});
+
 describe('toAORGBA', () => {
   it('expands AO to opaque grayscale RGBA', () => {
     const w = 4;

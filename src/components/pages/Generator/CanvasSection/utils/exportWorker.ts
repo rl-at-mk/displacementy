@@ -9,6 +9,7 @@ export type ExportRequest = {
   include: Record<string, boolean>;
   depths: Record<string, MapDepth>;
   params: Record<string, Record<string, number>>;
+  seamless: boolean;
   memberNames: Record<string, string>;
 };
 

@@ -28,6 +28,12 @@ export type MapContext = {
   palette: Uint8Array;
   /** Resolved param values for this map, keyed by `ParamSpec.key`. */
   params: Record<string, number>;
+  /**
+   * Whether the height buffer tiles seamlessly (seamless-texture mode). When
+   * true, neighbor sampling in derivations must **wrap** at edges rather than
+   * clamp, so the derived map tiles too.
+   */
+  seamless: boolean;
 };
 
 /**

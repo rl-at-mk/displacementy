@@ -20,6 +20,7 @@ const baseParams = (w: number, h: number): BuildMapsZipParams => ({
   include: {height: true, normal: true, color: true},
   depths: {height: 16, normal: 8, color: 8},
   params: {height: {}, normal: {strength: 1}, color: {}},
+  seamless: false,
   memberNames: {
     height: 'test_height',
     normal: 'test_normal',

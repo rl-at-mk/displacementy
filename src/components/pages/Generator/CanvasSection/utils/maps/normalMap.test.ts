@@ -57,6 +57,56 @@ describe('toNormalMapRGB16', () => {
   });
 });
 
+// Horizontal roll on an interleaved RGB (channels=3) or scalar buffer.
+const rollX = <T extends Float32Array | Uint8Array>(
+  a: T,
+  w: number,
+  h: number,
+  ch: number,
+  dx: number,
+): T => {
+  const out = new (a.constructor as new (n: number) => T)(a.length);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const src = (y * w + x) * ch;
+      const dst = (y * w + ((x + dx) % w)) * ch;
+      for (let c = 0; c < ch; c++) out[dst + c] = a[src + c];
+    }
+  return out;
+};
+
+describe('toNormalMapRGB8 seamless wrapping', () => {
+  const w = 16;
+  const h = 16;
+  const heights = new Float32Array(w * h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) heights[y * w + x] = x / (w - 1);
+
+  it('is shift-equivariant when seamless (so the normal tiles)', () => {
+    const n = toNormalMapRGB8(heights, w, h, 1, true);
+    const nOfRolled = toNormalMapRGB8(
+      rollX(heights, w, h, 1, 8),
+      w,
+      h,
+      1,
+      true,
+    );
+    expect([...nOfRolled]).toEqual([...rollX(n, w, h, 3, 8)]);
+  });
+
+  it('is NOT shift-equivariant when clamped (seam differs)', () => {
+    const n = toNormalMapRGB8(heights, w, h, 1, false);
+    const nOfRolled = toNormalMapRGB8(
+      rollX(heights, w, h, 1, 8),
+      w,
+      h,
+      1,
+      false,
+    );
+    expect([...nOfRolled]).not.toEqual([...rollX(n, w, h, 3, 8)]);
+  });
+});
+
 describe('toNormalMapRGBA', () => {
   it('expands the RGB normal to opaque RGBA', () => {
     const w = 2;

@@ -7,20 +7,9 @@
  * Working from the float `heights` (not the 8-bit canvas) avoids double
  * quantization. Output uses the OpenGL / +Y convention (R=x, G=y, B=z; B ≈
  * 128..255). `strength` scales the surface gradient — larger = deeper relief.
+ * `seamless` wraps edge sampling so a tiling height map yields a tiling normal.
  */
-
-/** Sample with replicated (clamped) edges so border pixels stay well-defined. */
-const sampleClamped = (
-  heights: Float32Array,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-): number => {
-  const cx = x < 0 ? 0 : x >= width ? width - 1 : x;
-  const cy = y < 0 ? 0 : y >= height ? height - 1 : y;
-  return heights[cy * width + cx];
-};
+import {makeHeightSampler} from './sampleHeights';
 
 /**
  * Core Sobel normal computation, quantized to `max` (255 for 8-bit, 65535 for
@@ -33,17 +22,19 @@ const buildNormal = <T extends Uint8Array | Uint16Array>(
   height: number,
   strength: number,
   max: number,
+  seamless: boolean,
 ): T => {
+  const sample = makeHeightSampler(heights, width, height, seamless);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const tl = sampleClamped(heights, width, height, x - 1, y - 1);
-      const tc = sampleClamped(heights, width, height, x, y - 1);
-      const tr = sampleClamped(heights, width, height, x + 1, y - 1);
-      const ml = sampleClamped(heights, width, height, x - 1, y);
-      const mr = sampleClamped(heights, width, height, x + 1, y);
-      const bl = sampleClamped(heights, width, height, x - 1, y + 1);
-      const bc = sampleClamped(heights, width, height, x, y + 1);
-      const br = sampleClamped(heights, width, height, x + 1, y + 1);
+      const tl = sample(x - 1, y - 1);
+      const tc = sample(x, y - 1);
+      const tr = sample(x + 1, y - 1);
+      const ml = sample(x - 1, y);
+      const mr = sample(x + 1, y);
+      const bl = sample(x - 1, y + 1);
+      const bc = sample(x, y + 1);
+      const br = sample(x + 1, y + 1);
 
       // Sobel gradients of the height field.
       const gx = tr + 2 * mr + br - (tl + 2 * ml + bl);
@@ -75,6 +66,7 @@ export const toNormalMapRGB8 = (
   width: number,
   height: number,
   strength: number,
+  seamless = false,
 ): Uint8Array =>
   buildNormal(
     new Uint8Array(width * height * 3),
@@ -83,6 +75,7 @@ export const toNormalMapRGB8 = (
     height,
     strength,
     255,
+    seamless,
   );
 
 /**
@@ -94,6 +87,7 @@ export const toNormalMapRGB16 = (
   width: number,
   height: number,
   strength: number,
+  seamless = false,
 ): Uint16Array =>
   buildNormal(
     new Uint16Array(width * height * 3),
@@ -102,6 +96,7 @@ export const toNormalMapRGB16 = (
     height,
     strength,
     65535,
+    seamless,
   );
 
 /**
@@ -113,8 +108,9 @@ export const toNormalMapRGBA = (
   width: number,
   height: number,
   strength: number,
+  seamless = false,
 ): Uint8ClampedArray => {
-  const rgb = toNormalMapRGB8(heights, width, height, strength);
+  const rgb = toNormalMapRGB8(heights, width, height, strength, seamless);
   const rgba = new Uint8ClampedArray(width * height * 4);
   for (let p = 0, q = 0; q < rgb.length; p += 4, q += 3) {
     rgba[p] = rgb[q];
