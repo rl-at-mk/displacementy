@@ -44,7 +44,10 @@
       "PowerShell(npx vitest run src/components/pages/Generator/CanvasSection/utils/heightmapPng.test.ts 2>&1)",
       "PowerShell(npx prettier --write \"src/components/pages/Generator/CanvasSection/CanvasSection.tsx\" \"src/components/pages/Generator/CanvasSection/utils/renderWorker.ts\" \"src/components/pages/Generator/CanvasSection/utils/heightmapPng.ts\" \"src/components/pages/Generator/CanvasSection/utils/heightmapPng.test.ts\" 2>&1)",
       "PowerShell(npx prettier --write \"src/components/pages/Generator/CanvasSection/utils/float/FloatRenderTarget.ts\" \"src/components/pages/Generator/CanvasSection/utils/float/FloatRenderTarget.test.ts\" 2>&1)",
-      "Bash(npx vitest *)"
+      "Bash(npx vitest *)",
+      "Bash(timeout 180 python -m pip install --quiet --disable-pip-version-check OpenEXR)",
+      "Bash(python -c \"import OpenEXR, Imath; print\\('OPENEXR_READY'\\)\")",
+      "Bash(rm -f gen_exr.mjs)"
     ]
   }
 }

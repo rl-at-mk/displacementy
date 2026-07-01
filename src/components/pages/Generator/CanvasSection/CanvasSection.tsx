@@ -14,7 +14,7 @@ import {drawColor} from './utils/drawColor';
 import {drawInvert} from './utils/drawInvert';
 import {saveImage} from './utils/saveImage';
 import {encodeHeightmap16} from './utils/heightmapPng';
-import {encodeHeightmapRaw32} from './utils/heightmapRaw';
+import {encodeHeightmapExr} from './utils/heightmapExr';
 import {getCtx2dFromRef} from './utils/getCtx2dFromRef';
 import {getCanvasDimensions} from './utils/getCanvasDimensions';
 
@@ -204,11 +204,11 @@ export function CanvasSection() {
         // 16-bit grayscale PNG: lossless heightmap, 65,536 levels.
         downloadBytes(encodeHeightmap16(data, w, h), `${base}.png`, 'image/png');
       } else {
-        // 32-bit float raw (.r32): the float buffer dumped verbatim, no loss.
+        // 32-bit float OpenEXR: the float buffer written verbatim, no loss.
         downloadBytes(
-          encodeHeightmapRaw32(data),
-          `${base}.r32`,
-          'application/octet-stream',
+          encodeHeightmapExr(data, w, h),
+          `${base}.exr`,
+          'image/x-exr',
         );
       }
       return;
@@ -364,8 +364,8 @@ export function CanvasSection() {
         />
         <span className='text-xs text-white/70 italic'>
           16-bit exports the grayscale height map at full precision (no
-          banding). 32-bit float exports a raw .r32 dump for Unity / Unreal /
-          World Machine.
+          banding). 32-bit float exports a lossless OpenEXR (.exr) for VFX / DCC
+          tools (Blender, Nuke, World Machine).
         </span>
       </SubSection>
       <SubSection
