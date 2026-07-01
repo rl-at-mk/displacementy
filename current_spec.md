@@ -291,24 +291,40 @@ on-screen preview.
 gradientRGBA,w,h)` reused by both preview and export (export runs offscreen).
    **Fix the latent `w`/`h` indexing bug in `drawNormal`** during this refactor
    (currently masked because the canvas is always square).
-3. **Encode + zip** — each map → `OffscreenCanvas` → `toBlob('image/png')` (native
-   8-bit, no encoder dep) → zip with **`fflate`** (tiny, recommended) → download.
-   Phase C synergy: height upgrades to 16-bit PNG once that lands; normal/color
-   stay 8-bit.
-4. **Filename scheme** — `{prefix}{base}{postfix}_{map}.png` (`map` ∈
+3. **Per-map depth & channels (important — they are NOT all the same).** Bit
+   depth/channels should follow each map's _purpose_, not a single global setting:
+   - **Height** = precision-critical data → **1-channel grayscale**, 8/16-bit
+     (32-bit float later). Also fixes a redundancy in the current 8-bit path:
+     `canvas.toDataURL` writes a 4-channel **RGBA** PNG (value duplicated across
+     R=G=B + a now-constant alpha). Encode the 8-bit height as **1-channel
+     grayscale** via `fast-png` (`depth 8, channels 1`) from the float buffer,
+     matching the 16-bit path — smaller and semantically correct.
+   - **Normal** = shading → **RGB** (drop the unused alpha). Two loss points to fix:
+     (a) `drawNormal` currently computes from the **8-bit canvas** — it must compute
+     from the **float height buffer** so the gradient isn't double-quantized;
+     (b) 8-bit/channel bands lighting on smooth surfaces, so offer **16-bit RGB**.
+     (Highest fidelity is actually letting the 3D tool derive normals from the
+     16-bit height; the exported normal is a convenience.)
+   - **Color** = visualization → **RGB 8-bit** is fine (palette LUT is inherently
+     ≤256 bands); just drop the unused alpha.
+4. **Encode + zip** — each map → bytes (grayscale via `fast-png`; RGB via
+   `OffscreenCanvas.toBlob` or `fast-png`) → zip with **`fflate`** (tiny,
+   recommended) → download.
+5. **Filename scheme** — `{prefix}{base}{postfix}_{map}.png` (`map` ∈
    height/normal/color); zip = `{prefix}{base}{postfix}.zip`. `base` defaults to the
    current `DisplacementY_{W}x{H}_{datetime}`. Sanitize illegal chars.
-5. **UI** — new "Export maps (.zip)" button in the output row + a collapsible
+6. **UI** — new "Export maps (.zip)" button in the output row + a collapsible
    "Export options" panel (prefix / base / postfix inputs, live filename preview,
-   per-map include checkboxes). Requires a new `Input` text UI primitive (none
-   exists yet).
-6. **Edge cases** — disabled when pristine; ensure gradient is populated for color;
+   per-map include checkboxes, per-map bit-depth where it applies). Requires a new
+   `Input` text UI primitive (none exists yet).
+7. **Edge cases** — disabled when pristine; ensure gradient is populated for color;
    at 8192² run async (optionally in a Worker) to avoid a main-thread stall.
 
 **Open decisions (defaults in bold):** zip lib **`fflate`** vs JSZip; maps
-**all-three default**, deselectable; persist filename prefs locally **(no for v1)**;
-derive from **8-bit canvas now**, defer float-quality normal + 16-bit height to
-Phase C.
+**all-three default**, deselectable; persist filename prefs locally **(no for v1)**.
+Resolved by the per-map analysis above: height 1-channel grayscale (8/16-bit),
+normal RGB computed from the float buffer (8-bit default, 16-bit option), color RGB
+8-bit; drop the unused alpha on normal/color.
 
 ## Testing
 

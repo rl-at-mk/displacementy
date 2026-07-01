@@ -14,12 +14,13 @@ import {drawColor} from './utils/drawColor';
 import {drawInvert} from './utils/drawInvert';
 import {saveImage} from './utils/saveImage';
 import {encodeHeightmap16} from './utils/heightmapPng';
+import {encodeHeightmapRaw32} from './utils/heightmapRaw';
 import {getCtx2dFromRef} from './utils/getCtx2dFromRef';
 import {getCanvasDimensions} from './utils/getCanvasDimensions';
 
 type Resolution = '1024' | '2048' | '4096' | '8192';
 type PreviewType = 'original' | 'normal' | 'color';
-type BitDepth = '8' | '16';
+type BitDepth = '8' | '16' | '32';
 
 export function CanvasSection() {
   const [resolution, setResolution] = useState<Resolution>('2048');
@@ -178,19 +179,38 @@ export function CanvasSection() {
       return `${y}-${m}-${d}-${hh}${mm}${ss}`;
     };
 
-    // 16-bit: export the retained float height buffer as a 16-bit grayscale PNG
-    // (always the height map, at full precision — independent of any preview).
-    if (bitDepth === '16') {
+    const downloadBytes = (
+      bytes: Uint8Array,
+      fileName: string,
+      mimeType: string,
+    ): void => {
+      const url = URL.createObjectURL(new Blob([bytes], {type: mimeType}));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    // 16/32-bit: export the retained float height buffer (always the height map,
+    // at full precision — independent of any preview or inversion).
+    if (bitDepth === '16' || bitDepth === '32') {
       const heightmap = lastHeightsRef.current;
       if (!heightmap) return;
       const {data, width: w, height: h} = heightmap;
-      const png = encodeHeightmap16(data, w, h);
-      const url = URL.createObjectURL(new Blob([png], {type: 'image/png'}));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `DisplacementY_${w}x${h}_${dateTimeString()}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const base = `DisplacementY_${w}x${h}_${dateTimeString()}`;
+
+      if (bitDepth === '16') {
+        // 16-bit grayscale PNG: lossless heightmap, 65,536 levels.
+        downloadBytes(encodeHeightmap16(data, w, h), `${base}.png`, 'image/png');
+      } else {
+        // 32-bit float raw (.r32): the float buffer dumped verbatim, no loss.
+        downloadBytes(
+          encodeHeightmapRaw32(data),
+          `${base}.r32`,
+          'application/octet-stream',
+        );
+      }
       return;
     }
 
@@ -337,13 +357,15 @@ export function CanvasSection() {
           items={[
             {value: '8', label: '8-bit'},
             {value: '16', label: '16-bit'},
+            {value: '32', label: '32-bit float'},
           ]}
           value={bitDepth}
           setValue={setBitDepth}
         />
         <span className='text-xs text-white/70 italic'>
           16-bit exports the grayscale height map at full precision (no
-          banding).
+          banding). 32-bit float exports a raw .r32 dump for Unity / Unreal /
+          World Machine.
         </span>
       </SubSection>
       <SubSection

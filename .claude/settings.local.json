@@ -43,7 +43,8 @@
       "PowerShell(npm ls fast-png 2>$null)",
       "PowerShell(npx vitest run src/components/pages/Generator/CanvasSection/utils/heightmapPng.test.ts 2>&1)",
       "PowerShell(npx prettier --write \"src/components/pages/Generator/CanvasSection/CanvasSection.tsx\" \"src/components/pages/Generator/CanvasSection/utils/renderWorker.ts\" \"src/components/pages/Generator/CanvasSection/utils/heightmapPng.ts\" \"src/components/pages/Generator/CanvasSection/utils/heightmapPng.test.ts\" 2>&1)",
-      "PowerShell(npx prettier --write \"src/components/pages/Generator/CanvasSection/utils/float/FloatRenderTarget.ts\" \"src/components/pages/Generator/CanvasSection/utils/float/FloatRenderTarget.test.ts\" 2>&1)"
+      "PowerShell(npx prettier --write \"src/components/pages/Generator/CanvasSection/utils/float/FloatRenderTarget.ts\" \"src/components/pages/Generator/CanvasSection/utils/float/FloatRenderTarget.test.ts\" 2>&1)",
+      "Bash(npx vitest *)"
     ]
   }
 }
