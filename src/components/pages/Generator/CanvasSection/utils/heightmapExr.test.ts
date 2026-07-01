@@ -75,7 +75,8 @@ describe('encodeHeightmapExr', () => {
     const width = 5;
     const height = 3;
     const heights = new Float32Array(width * height);
-    for (let i = 0; i < heights.length; i++) heights[i] = i / (heights.length - 1);
+    for (let i = 0; i < heights.length; i++)
+      heights[i] = i / (heights.length - 1);
 
     const exr = encodeHeightmapExr(heights, width, height);
     const decoded = decodeExr(exr);

@@ -15,8 +15,7 @@
  */
 
 /** Host endianness, computed once (see heightmap fast path below). */
-const HOST_LITTLE_ENDIAN =
-  new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+const HOST_LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
 const textEncoder = new TextEncoder();
 
@@ -81,7 +80,10 @@ export const encodeHeightmapExr = (
     ...attribute('displayWindow', 'box2i', window),
     ...attribute('lineOrder', 'lineOrder', [0]), // INCREASING_Y
     ...attribute('pixelAspectRatio', 'float', float32LE(1)),
-    ...attribute('screenWindowCenter', 'v2f', [...float32LE(0), ...float32LE(0)]),
+    ...attribute('screenWindowCenter', 'v2f', [
+      ...float32LE(0),
+      ...float32LE(0),
+    ]),
     ...attribute('screenWindowWidth', 'float', float32LE(1)),
     0, // header terminator (empty attribute name)
   ];
@@ -121,7 +123,11 @@ export const encodeHeightmapExr = (
     if (HOST_LITTLE_ENDIAN) {
       // Float32 bytes are already little-endian — copy the row directly.
       out.set(
-        new Uint8Array(heights.buffer, heights.byteOffset + rowStart * 4, rowBytes),
+        new Uint8Array(
+          heights.buffer,
+          heights.byteOffset + rowStart * 4,
+          rowBytes,
+        ),
         pixelsPos,
       );
     } else {

@@ -1,9 +1,24 @@
 # Spec — CPU Float-Precision Rendering Core (for true 16-bit export)
 
 > Status: **Phases 0 + A + B + D done and verified in-browser; Phase C in
-> progress (16-bit PNG export done; 32-bit pending).** This is the active spec.
+> progress (16-bit PNG + 32-bit float EXR export done).** This is the active spec.
 > (The prior parameter-locks spec was fully implemented and removed; the code is
 > its record.)
+>
+> **Phase C progress — 32-bit float EXR export.** The 32-bit option exports a
+> lossless **OpenEXR** (`.exr`) instead of the originally-planned raw `.r32`. It is
+> a hand-rolled, zero-dependency **uncompressed single-channel (`Y`) FLOAT scanline**
+> EXR
+> ([heightmapExr.ts](src/components/pages/Generator/CanvasSection/utils/heightmapExr.ts))
+> that writes the retained float height buffer **verbatim — no quantization, no
+> clamping** (so out-of-`0..1` headroom survives). Chosen over `.r32` because EXR is
+> self-describing (carries its own dimensions/pixel type) and read natively by
+> VFX/DCC tools (Blender, Nuke, World Machine), whereas a raw dump needs the consumer
+> to know width/height/endianness out of band. Verified by round-trip unit test
+> (independent parser) **and** against the real `OpenEXR` Python library (channel
+> `Y`, `NO_COMPRESSION`, values incl. negative/>1 matched exactly). The bit-depth
+> selector is now `8 | 16 | 32`; 8-bit is unchanged (visible canvas), 16/32-bit both
+> export the float height buffer independent of preview.
 >
 > **Phase C progress — 16-bit height export.** The Worker now transfers the
 > `Float32` height buffer back alongside the 8-bit RGBA; the main thread retains
@@ -159,15 +174,20 @@ the core changes to support a wider format.
   this uses an existing encoder package (see Decisions).
 - **32-bit float:** write the `Float32` values **directly — no quantization, no
   loss**. PNG cannot hold float (16-bit integer max), so this needs a
-  float-capable container:
-  - **Raw `.r32`** (little-endian Float32 dump) — zero-dependency; ingested by
-    Unity / Unreal / World Machine. Cheapest; recommended first.
-  - **OpenEXR `.exr`** — VFX/Blender standard for float imagery; needs an EXR
-    encoder.
-  - **32-bit float TIFF** — broad DCC/terrain support; medium encoder cost.
+  float-capable container. **Shipped: OpenEXR `.exr`** —
+  ([heightmapExr.ts](src/components/pages/Generator/CanvasSection/utils/heightmapExr.ts)),
+  a hand-rolled zero-dependency **uncompressed single-channel (`Y`) FLOAT
+  scanline** EXR. Chosen over the originally-planned raw `.r32` because EXR is
+  self-describing (carries its own dimensions/pixel type) and the VFX/DCC standard
+  for float imagery (Blender, Nuke, World Machine), so it needs no out-of-band
+  metadata. Alternatives considered and not pursued:
+  - **Raw `.r32`** (little-endian Float32 dump) — also zero-dependency, but the
+    consumer must know width/height/endianness out of band. Superseded by EXR.
+  - **32-bit float TIFF** — broad DCC/terrain support; not needed given EXR.
 
-Bit depth + format collapse into a single selector: **PNG → 8 or 16-bit;
-EXR / TIFF / raw → 32-bit float.**
+Bit depth + format currently map through a single selector: **8 | 16 | 32-bit**
+(**PNG → 8 or 16-bit; EXR → 32-bit float**). A distinct format picker would only
+be needed if a second 32-bit container (TIFF/raw) is ever added.
 
 **Expectation-setting:** 16-bit already removes visible banding and is the
 practical heightmap standard. 32-bit float mainly buys HDR range, out-of-`0..1`
@@ -234,9 +254,12 @@ Correctness phases (in order):
   sprites.) Runs on the main thread with the existing rAF batching.
 - **Phase B ✅ DONE (visual check pending)** — Sprites in the float pipeline via
   offscreen-canvas rasterization + float blend.
-- **Phase C (in progress)** — Export off the float buffer:
-  - ✅ 16-bit grayscale PNG height export (`fast-png`) + an 8/16-bit selector.
-  - ⬜ 32-bit float export (raw `.r32` first, then EXR/TIFF) + a format selector.
+- **Phase C ✅ DONE** — Export off the float buffer:
+  - ✅ 16-bit grayscale PNG height export (`fast-png`).
+  - ✅ 32-bit float export as **uncompressed single-channel FLOAT OpenEXR**
+    (`.exr`, hand-rolled, zero-dependency) — chosen over raw `.r32`/TIFF; verified
+    against the real `OpenEXR` library.
+  - `8 | 16 | 32` bit-depth selector wired for all three.
 
 Later — performance stage (only after Phases 0–C are correct and verified):
 
@@ -275,7 +298,53 @@ Later — performance stage (only after Phases 0–C are correct and verified):
 
 ## Planned feature — Multi-map ZIP export (height + normal + color)
 
-> Status: **planned, not implemented.** Export-adjacent (overlaps Phase C).
+> Status: **v1 (core-first) DONE — verified by tests, build, and live in-browser
+> click-through.** The full options-panel UI remains a follow-up.
+>
+> **Live verification (in-browser).** Render → "Export maps (.zip)" produced a valid
+> `PK` zip (`application/zip`, ~825 KB) named `DisplacementY_2048x2048_<ts>.zip`; the
+> overlay reused the progress bar showing **"Exporting 70%"**. Unzipped members
+> confirmed: `_height.png` 8-bit grayscale (→ **16-bit grayscale** when the selector
+> is 16-bit), `_normal.png` + `_color.png` 8-bit RGB, all stored uncompressed (level
+> 0). The **strength slider** (0.1–5) visibly changes the normal preview at relief
+> pixels (0.1 → `~(115,128,254)`, 5 → `~(3,128,153)`), proving the value flows into
+> the shared Sobel path; the color preview renders chromatic and toggles back to
+> original cleanly.
+>
+> **v1 shipped.** A single **"Export maps (.zip)"** button
+> ([CanvasSection.tsx](src/components/pages/Generator/CanvasSection/CanvasSection.tsx))
+> derives height + normal + color from the retained float buffer, encodes them, and
+> downloads one zip. The work runs **off the main thread** in
+> [exportWorker.ts](src/components/pages/Generator/CanvasSection/utils/exportWorker.ts)
+> (wrapping the pure
+> [buildMapsZip.ts](src/components/pages/Generator/CanvasSection/utils/maps/buildMapsZip.ts)),
+> driving the **existing "Rendering" overlay** relabeled "Exporting NN%". Maps:
+> **height** 1-channel grayscale (depth follows the global `8|16` selector, `32`→16)
+> via `fast-png`; **normal** RGB 8-bit via the **3×3 Sobel** operator
+> ([normalMap.ts](src/components/pages/Generator/CanvasSection/utils/maps/normalMap.ts))
+> with a **tunable strength Slider** (default 1.0, range 0.1–5); **color** RGB 8-bit
+> via a palette LUT
+> ([colorMap.ts](src/components/pages/Generator/CanvasSection/utils/maps/colorMap.ts)).
+> Zipped with `fflate` (`zipSync`, level 0 — PNGs are already compressed). The
+> normal/color **preview** was rewired to the same pure functions (deleting
+> `drawNormal`/`drawColor` and fixing their `w`/`h` bug), so preview == export.
+> Verified: 64 unit tests incl. a real zip round-trip (`unzipSync` + `fast-png`
+> decode of all three members — names, dims, channels, height depth), Sobel/LUT math,
+> `tsc` clean, and a clean production build emitting the `exportWorker` chunk with
+> `fflate`/`fast-png` bundled.
+>
+> **Deferred to v2 (full UI):** collapsible "Export options" panel, new `Input` text
+> primitive, prefix/base/postfix filename fields + live preview, per-map include
+> checkboxes, per-map bit-depth (incl. 16-bit normal). See steps 5–6 and the future
+> derived-maps note.
+>
+> **Scope decision — core-first (v1).** Ship a single **"Export maps (.zip)"**
+> button that produces height + normal + color in one zip with the default filename
+> scheme and sensible per-map defaults, plus **one strength slider** for the normal
+> map. Keep the UI **simple but functional**: **no** collapsible options panel, **no**
+> `Input` text primitive, **no** per-map include checkboxes or per-map bit-depth
+> controls in v1 (steps 5–6's full UI is deferred to a follow-up). Height depth
+> follows the **existing global `8|16` selector** (`32`→16 in the zip).
 
 A single **"Export maps (.zip)"** action that produces height + normal + color
 PNGs in one zip, with a customizable filename, without disturbing the current
@@ -283,22 +352,48 @@ on-screen preview.
 
 **Design:**
 
-1. **Retain rendered height pixels** — store the last-rendered RGBA (from the
-   Worker `done` message) in a ref, independent of preview state, so export always
-   derives from the true height map regardless of what preview is displayed.
-2. **Pure map transforms** — refactor the in-place `drawNormal`/`drawColor` preview
-   functions into pure `toNormalMap(heightRGBA,w,h)` / `toColorMap(heightRGBA,
-gradientRGBA,w,h)` reused by both preview and export (export runs offscreen).
-   **Fix the latent `w`/`h` indexing bug in `drawNormal`** during this refactor
-   (currently masked because the canvas is always square).
+1. **Single source = the retained float buffer** (✅ v1; confirmed against the code). No
+   separate "retain last RGBA" ref is needed: the float height buffer is already
+   retained in `lastHeightsRef` (invalidated on resolution change, independent of
+   preview), and **all three maps derive from it** — height→grayscale,
+   normal→gradient of the float heights, color→palette LUT on the float heights.
+   Deriving from the float buffer is both simpler and strictly higher fidelity than
+   re-reading the 8-bit canvas (no double-quantization anywhere). Color additionally
+   reads the gradient canvas (see step 7).
+2. **Pure map transforms** (✅ v1) — refactored the in-place `drawNormal`/`drawColor`
+   preview functions into pure `toNormalMapRGB8(heights,w,h,strength)` /
+   `toColorMapRGB8(heights,palette,w,h)` (+ `…RGBA` preview adapters) reused by both
+   preview and export (export runs offscreen). These take the **float `heights`**
+   buffer, not `heightRGBA`. The old `drawNormal`/`drawColor` were **deleted** and
+   their `w`/`h` indexing bug fixed (the Sobel path indexes correctly), so preview ==
+   export.
+
+   **Normal-map algorithm — Sobel operator (chosen; ✅ v1).** Replace the current 2-tap
+   neighbor-difference with the industry-standard **3×3 Sobel** gradient (what
+   Substance 3D Designer's "Normal Sobel" node, ShaderMap, and the common
+   open-source height→normal generators use). It is efficient (9 taps/pixel, integer
+   kernel) and noticeably smoother/less noisy than central differences. Per pixel,
+   over the float heights `h(x,y)` (edges clamped/replicated):
+   - `gx = (h[x+1,y-1] + 2·h[x+1,y] + h[x+1,y+1]) − (h[x-1,y-1] + 2·h[x-1,y] + h[x-1,y+1])`
+   - `gy = (h[x-1,y+1] + 2·h[x,y+1] + h[x+1,y+1]) − (h[x-1,y-1] + 2·h[x,y-1] + h[x+1,y-1])`
+   - `n = normalize(−gx·strength, −gy·strength, 1)`
+   - encode: `R = (n.x·0.5+0.5)·255`, `G = (n.y·0.5+0.5)·255`, `B = (n.z·0.5+0.5)·255`
+     (OpenGL/+Y convention; `B` ≈ 128..255). 16-bit option scales by 65535 instead.
+   - **`strength`** is a tunable scalar (default **1.0**, range ~**0.1..5**) exposed
+     via a single Slider (the existing `Slider` primitive) — larger = deeper relief.
+     `toNormalMap` takes it as a parameter so preview and export stay identical.
 3. **Per-map depth & channels (important — they are NOT all the same).** Bit
-   depth/channels should follow each map's _purpose_, not a single global setting:
-   - **Height** = precision-critical data → **1-channel grayscale**, 8/16-bit
-     (32-bit float later). Also fixes a redundancy in the current 8-bit path:
-     `canvas.toDataURL` writes a 4-channel **RGBA** PNG (value duplicated across
-     R=G=B + a now-constant alpha). Encode the 8-bit height as **1-channel
-     grayscale** via `fast-png` (`depth 8, channels 1`) from the float buffer,
-     matching the 16-bit path — smaller and semantically correct.
+   depth/channels follow each map's _purpose_, not a single global setting. (v1
+   status: height 8/16 grayscale ✅, normal 8-bit RGB ✅, color 8-bit RGB ✅;
+   **16-bit normal RGB deferred to v2**.)
+   - **Height** = precision-critical data → **1-channel grayscale**. Depth
+     **follows the existing global bit-depth selector** (`8 | 16`), for consistency
+     with the single-file Download button; the selector's **`32` (EXR) maps to 16**
+     in the zip (EXR-in-zip is out of scope for v1). Also fixes a redundancy in the
+     current 8-bit path: `canvas.toDataURL` writes a 4-channel **RGBA** PNG (value
+     duplicated across R=G=B + a now-constant alpha). Encode the 8-bit height as
+     **1-channel grayscale** via `fast-png` (`depth 8, channels 1`) from the float
+     buffer, matching the 16-bit path — smaller and semantically correct.
    - **Normal** = shading → **RGB** (drop the unused alpha). Two loss points to fix:
      (a) `drawNormal` currently computes from the **8-bit canvas** — it must compute
      from the **float height buffer** so the gradient isn't double-quantized;
@@ -307,24 +402,62 @@ gradientRGBA,w,h)` reused by both preview and export (export runs offscreen).
      16-bit height; the exported normal is a convenience.)
    - **Color** = visualization → **RGB 8-bit** is fine (palette LUT is inherently
      ≤256 bands); just drop the unused alpha.
-4. **Encode + zip** — each map → bytes (grayscale via `fast-png`; RGB via
-   `OffscreenCanvas.toBlob` or `fast-png`) → zip with **`fflate`** (tiny,
-   recommended) → download.
+4. **Encode + zip** (✅ v1) — each map → bytes (all three via `fast-png`: grayscale
+   1-channel for height, RGB 3-channel for normal/color) → zip with **`fflate`**
+   (`zipSync`, **level 0** since PNGs are already deflate-compressed) → download.
 5. **Filename scheme** — `{prefix}{base}{postfix}_{map}.png` (`map` ∈
    height/normal/color); zip = `{prefix}{base}{postfix}.zip`. `base` defaults to the
-   current `DisplacementY_{W}x{H}_{datetime}`. Sanitize illegal chars.
-6. **UI** — new "Export maps (.zip)" button in the output row + a collapsible
-   "Export options" panel (prefix / base / postfix inputs, live filename preview,
-   per-map include checkboxes, per-map bit-depth where it applies). Requires a new
-   `Input` text UI primitive (none exists yet).
-7. **Edge cases** — disabled when pristine; ensure gradient is populated for color;
-   at 8192² run async (optionally in a Worker) to avoid a main-thread stall.
+   current `DisplacementY_{W}x{H}_{datetime}`. Sanitize illegal chars. (v1: **`base`
+   only** — `{base}_{map}.png` members, `{base}.zip`; prefix/postfix + custom base
+   deferred to v2.)
+6. **UI (v1 — core-first).** A new **"Export maps (.zip)"** button in the output row
+   (next to Download), disabled when pristine/rendering, plus a **normal-map strength
+   Slider**. The full collapsible "Export options" panel (prefix / base / postfix
+   inputs, live filename preview, per-map include checkboxes, per-map bit-depth) and
+   the new `Input` text primitive it needs are **deferred to a follow-up** — see the
+   scope decision above.
+7. **Async + progress (offloaded; ✅ v1).** The map derivation + PNG encoding + zip
+   run **off the main thread in a Worker** (always, not just at 8192²), so a
+   268 MB × 3-map encode never stalls the UI. **Reuses the existing "Rendering"
+   overlay + progress bar** ([Canvas.tsx](src/components/pages/Generator/CanvasSection/Canvas/Canvas.tsx)):
+   the export Worker posts `onProgress` (coarse per-stage) driving the same
+   determinate bar, with the label switched to "Exporting NN%" via an `isExporting`
+   flag. Implementation detail: a **copy** of the float `heights` is transferred to the
+   Worker (`heights.slice()` then transfer the copy's buffer) so the retained
+   `lastHeightsRef` stays intact for future exports / 16-bit download; the palette
+   (gradient row 0, read on the main thread) is transferred too; the Worker returns
+   the finished `.zip` bytes as a transferable. **Gradient availability confirmed:**
+   the gradient canvas is drawn on mount (256×256, palette in row 0) in `Gradient.tsx`,
+   independent of whether the color preview was ever opened — so color export always
+   has a populated palette to read (its row-0 RGBA is posted to the Worker). No extra
+   guard needed.
 
-**Open decisions (defaults in bold):** zip lib **`fflate`** vs JSZip; maps
-**all-three default**, deselectable; persist filename prefs locally **(no for v1)**.
-Resolved by the per-map analysis above: height 1-channel grayscale (8/16-bit),
-normal RGB computed from the float buffer (8-bit default, 16-bit option), color RGB
-8-bit; drop the unused alpha on normal/color.
+**Decisions (v1 resolved):** zip lib **`fflate`** (chosen, `zipSync` level 0); maps
+**all three, always included** in v1 (deselect checkboxes deferred to v2); filename
+prefs not persisted. Per-map analysis: height 1-channel grayscale (depth **follows
+the global `8|16` selector**, `32`→16 in the zip), normal RGB (8-bit in v1; 16-bit
+option deferred), color RGB 8-bit; unused alpha dropped on normal/color.
+
+**Future extension — more derived maps (planned, not v1).** The zip is expected to
+grow beyond height/normal/color into additional PBR-style maps derived from the same
+float height buffer. **Design for this now** so adding a map is a small, local change:
+model each map as a **`{ key, label, derive(heights,w,h,params) → typed pixels,
+channels, depth, include }`** entry in a single registry that both the export Worker
+and (later) the options-panel UI iterate over — so a new map = one registry entry +
+its `derive` fn, no plumbing changes. Likely future maps and their derivation:
+
+- **Ambient occlusion (AO)** — cavity/occlusion from the height field (e.g. compare
+  each texel against a neighborhood average, or a lightweight horizon/cone
+  approximation). RGB or grayscale, 8-bit.
+- **Roughness / specular / metalness** — typically **remaps of height (or its slope)
+  through a curve/gradient LUT**, so they reuse the same LUT machinery as the color
+  map; grayscale 8-bit.
+- **Curvature / displacement variants** — also pure functions of the height field.
+
+All are pure functions of the retained float buffer (± the gradient LUT), so they fit
+the same offloaded-Worker + progress-bar pipeline as v1's three maps; each just adds
+its own `onProgress` slice. The **strength/param** pattern used for the normal map
+generalizes to per-map params in the eventual options panel.
 
 ## Testing
 
@@ -342,11 +475,13 @@ Resolved:
 - **A. Buffer layout — single-channel grayscale `Float32Array`.** The output is a
   height map; color is applied only at the color-preview LUT stage, so it need not
   live in the accumulation buffer. (~256 MB at 8192²; RGBA float ~1 GiB rejected.)
-- **B. Export encoders — use existing packages, not hand-rolled.** 16-bit grayscale
-  PNG via an existing library (e.g. `fast-png`, which supports 16-bit single-channel;
-  `UPNG.js` as an alternative). 32-bit float raw `.r32` needs no package (direct byte
-  dump); EXR / float TIFF, if pursued, also via existing packages. Final library pick
-  confirmed at implementation.
+- **B. Export encoders.** 16-bit grayscale PNG via **`fast-png`** (supports 16-bit
+  single-channel). 32-bit float ships as **OpenEXR**, and here we **did hand-roll**
+  the encoder rather than add a package: the needed variant (uncompressed,
+  single-channel FLOAT scanline) is small and self-contained, keeping deps lean
+  (`fast-png` remains the only encoder dependency). Correctness is covered by an
+  independent-parser round-trip test **plus** validation against the real `OpenEXR`
+  library. (Superseded the earlier "raw `.r32`, existing packages only" leaning.)
 - **C. Rendering baseline — accept the new baseline; no compatibility shim.** There
   are no users yet, so previously shared URLs are not a concern. The float math
   changes exact output and that is fine. (Optionally stamp a renderer version in the

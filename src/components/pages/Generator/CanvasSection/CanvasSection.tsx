@@ -3,14 +3,17 @@ import {useRef, useState} from 'react';
 import {useStore} from '../store';
 import {Button} from '@/components/ui/Button';
 import {RadioGroup} from '@/components/ui/RadioGroup';
+import {Slider} from '@/components/ui/Slider';
 import {SectionTitle} from '../SectionTitle';
 import {Canvas} from './Canvas';
 import {Gradient} from './Gradient';
 import {SubSection} from './SubSection';
 import {loadSprites, type DrawProps} from './utils/draw';
 import {type RenderRequest, type RenderResponse} from './utils/renderWorker';
-import {drawNormal} from './utils/drawNormal';
-import {drawColor} from './utils/drawColor';
+import {type ExportRequest, type ExportResponse} from './utils/exportWorker';
+import {type HeightDepth} from './utils/maps/buildMapsZip';
+import {toNormalMapRGBA} from './utils/maps/normalMap';
+import {toColorMapRGBA, paletteFromRowRGBA} from './utils/maps/colorMap';
 import {drawInvert} from './utils/drawInvert';
 import {saveImage} from './utils/saveImage';
 import {encodeHeightmap16} from './utils/heightmapPng';
@@ -22,6 +25,18 @@ type Resolution = '1024' | '2048' | '4096' | '8192';
 type PreviewType = 'original' | 'normal' | 'color';
 type BitDepth = '8' | '16' | '32';
 
+/** Timestamp for export filenames, e.g. `2026-07-01-143005`. */
+const dateTimeStamp = (): string => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0'); // Months are zero-based
+  const d = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  return `${y}-${m}-${d}-${hh}${mm}${ss}`;
+};
+
 export function CanvasSection() {
   const [resolution, setResolution] = useState<Resolution>('2048');
   const width = Number(resolution);
@@ -29,10 +44,15 @@ export function CanvasSection() {
 
   const [isPristine, setIsPristine] = useState<boolean>(true);
   const [isRendering, setIsRendering] = useState<boolean>(false);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(0);
   const [previewType, setPreviewType] = useState<PreviewType>('original');
   const [justCopiedUrl, setJustCopiedUrl] = useState<boolean>(false);
   const [bitDepth, setBitDepth] = useState<BitDepth>('8');
+  const [normalStrength, setNormalStrength] = useState<number>(1);
+
+  // Any long-running canvas work; blocks re-entrant actions and shows the overlay.
+  const isBusy = isRendering || isExporting;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasOriginalPreviewDataUrl = useRef<string | undefined>(undefined);
@@ -168,17 +188,6 @@ export function CanvasSection() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const dateTimeString = (): string => {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0'); // Months are zero-based
-      const d = String(now.getDate()).padStart(2, '0');
-      const hh = String(now.getHours()).padStart(2, '0');
-      const mm = String(now.getMinutes()).padStart(2, '0');
-      const ss = String(now.getSeconds()).padStart(2, '0');
-      return `${y}-${m}-${d}-${hh}${mm}${ss}`;
-    };
-
     const downloadBytes = (
       bytes: Uint8Array,
       fileName: string,
@@ -198,11 +207,15 @@ export function CanvasSection() {
       const heightmap = lastHeightsRef.current;
       if (!heightmap) return;
       const {data, width: w, height: h} = heightmap;
-      const base = `DisplacementY_${w}x${h}_${dateTimeString()}`;
+      const base = `DisplacementY_${w}x${h}_${dateTimeStamp()}`;
 
       if (bitDepth === '16') {
         // 16-bit grayscale PNG: lossless heightmap, 65,536 levels.
-        downloadBytes(encodeHeightmap16(data, w, h), `${base}.png`, 'image/png');
+        downloadBytes(
+          encodeHeightmap16(data, w, h),
+          `${base}.png`,
+          'image/png',
+        );
       } else {
         // 32-bit float OpenEXR: the float buffer written verbatim, no loss.
         downloadBytes(
@@ -217,8 +230,73 @@ export function CanvasSection() {
     // 8-bit: the visible canvas as-is (respects the current preview/inversion).
     saveImage({
       canvas,
-      fileName: `DisplacementY_${width}x${height}_${dateTimeString()}`,
+      fileName: `DisplacementY_${width}x${height}_${dateTimeStamp()}`,
     });
+  };
+
+  // Export height + normal + color maps as a single zip, derived from the retained
+  // float buffer (not the 8-bit canvas) and built off the main thread in a Worker.
+  const exportMaps = () => {
+    const heightmap = lastHeightsRef.current;
+    if (!heightmap) return;
+    const {data: heights, width: w, height: h} = heightmap;
+
+    // Read the gradient palette (top row) on the main thread — the Worker has no
+    // DOM canvas — and pass it along.
+    const gradientCtx = getCtx2dFromRef(gradientCanvasRef);
+    const {w: gradientWidth} = getCanvasDimensions(gradientCtx);
+    const palette = paletteFromRowRGBA(
+      gradientCtx.getImageData(0, 0, gradientWidth, 1).data,
+    );
+
+    // Zip height depth follows the global selector; 32-bit (EXR) maps to 16 here.
+    const heightDepth: HeightDepth = bitDepth === '8' ? 8 : 16;
+    const fileBase = `DisplacementY_${w}x${h}_${dateTimeStamp()}`;
+
+    setIsExporting(true);
+    setProgress(0);
+
+    const worker = new Worker(
+      new URL('./utils/exportWorker.ts', import.meta.url),
+      {type: 'module'},
+    );
+    worker.onmessage = (event: MessageEvent<ExportResponse>) => {
+      const message = event.data;
+      if (message.type === 'progress') {
+        setProgress(message.fraction);
+        return;
+      }
+
+      const url = URL.createObjectURL(
+        new Blob([message.zip], {type: 'application/zip'}),
+      );
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${fileBase}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      worker.terminate();
+      setIsExporting(false);
+    };
+    worker.onerror = (event) => {
+      worker.terminate();
+      setIsExporting(false);
+      throw new Error(`Export worker failed: ${event.message}`);
+    };
+
+    // Transfer a COPY of the heights (keep the retained buffer intact for future
+    // exports / 16-bit download); the palette is freshly built, safe to transfer.
+    const heightsCopy = heights.slice();
+    const request: ExportRequest = {
+      heights: heightsCopy,
+      width: w,
+      height: h,
+      palette,
+      normalStrength,
+      heightDepth,
+      fileBase,
+    };
+    worker.postMessage(request, [heightsCopy.buffer, palette.buffer]);
   };
 
   const copyUrl = () => {
@@ -256,21 +334,28 @@ export function CanvasSection() {
       const shouldDrawNonOriginal = previewType === 'original';
 
       const ctx2d = getCtx2dFromRef(canvasRef);
-      const ctx2dGradient = getCtx2dFromRef(gradientCanvasRef);
 
       if (shouldDrawNonOriginal) {
-        // Save original preview
+        // Save the current view (may be inverted) to restore on toggle-off.
         canvasOriginalPreviewDataUrl.current = ctx2d.canvas.toDataURL();
-        // Draw preview based on type
-        switch (type) {
-          case 'normal':
-            drawNormal(ctx2d);
-            break;
-          case 'color':
-            drawColor({ctx2d, ctx2dGradient});
-            break;
-          default:
-            break;
+
+        // Derive the preview from the retained float buffer (same source and math
+        // as the map export), not the 8-bit canvas.
+        const heightmap = lastHeightsRef.current;
+        if (heightmap) {
+          const {data, width: w, height: h} = heightmap;
+          if (type === 'normal') {
+            const rgba = toNormalMapRGBA(data, w, h, normalStrength);
+            ctx2d.putImageData(new ImageData(rgba, w, h), 0, 0);
+          } else if (type === 'color') {
+            const gradientCtx = getCtx2dFromRef(gradientCanvasRef);
+            const {w: gradientWidth} = getCanvasDimensions(gradientCtx);
+            const palette = paletteFromRowRGBA(
+              gradientCtx.getImageData(0, 0, gradientWidth, 1).data,
+            );
+            const rgba = toColorMapRGBA(data, palette, w, h);
+            ctx2d.putImageData(new ImageData(rgba, w, h), 0, 0);
+          }
         }
       } else {
         // Restore original preview
@@ -306,20 +391,32 @@ export function CanvasSection() {
           width={width}
           height={height}
           isRendering={isRendering}
+          isExporting={isExporting}
           isPristine={isPristine}
           progress={progress}
         />
       </div>
       <div className='flex flex-wrap gap-1 pt-2'>
-        <Button disabled={isRendering} onClick={render}>
+        <Button disabled={isBusy} onClick={render}>
           Render
         </Button>
         <Button
-          disabled={isPristine || isRendering}
+          disabled={isPristine || isBusy}
           title={isPristine ? 'Render first to enable download' : undefined}
           onClick={download}
         >
           Download
+        </Button>
+        <Button
+          disabled={isPristine || isBusy}
+          title={
+            isPristine
+              ? 'Render first to enable export'
+              : 'Export height, normal and color maps as a .zip'
+          }
+          onClick={exportMaps}
+        >
+          Export maps (.zip)
         </Button>
         <Button onClick={copyUrl}>
           {justCopiedUrl ? 'Copied!' : 'Copy URL'}
@@ -377,7 +474,7 @@ export function CanvasSection() {
             : 'Return to the original preview to enable.'
         }
       >
-        <Button disabled={isRendering || invertDisabled} onClick={invert}>
+        <Button disabled={isBusy || invertDisabled} onClick={invert}>
           Invert
         </Button>
       </SubSection>
@@ -391,11 +488,29 @@ export function CanvasSection() {
         }
       >
         <Button
-          disabled={isRendering || normalDisabled}
+          disabled={isBusy || normalDisabled}
           onClick={togglePreviewFor('normal')}
         >
           Preview {previewType === 'normal' ? 'original' : 'normal'}
         </Button>
+      </SubSection>
+      <SubSection
+        title='Normal map strength'
+        disabled={isPristine}
+        hint='Render first to enable.'
+      >
+        <Slider
+          label='Strength'
+          min={0.1}
+          max={5}
+          step={0.1}
+          value={normalStrength}
+          setValue={setNormalStrength}
+        />
+        <span className='text-xs text-white/70 italic'>
+          Controls relief depth of the exported normal map (and the normal
+          preview on next toggle).
+        </span>
       </SubSection>
       <SubSection
         title='Color'
@@ -407,7 +522,7 @@ export function CanvasSection() {
         }
       >
         <Button
-          disabled={isRendering || colorDisabled}
+          disabled={isBusy || colorDisabled}
           onClick={togglePreviewFor('color')}
         >
           Preview {previewType === 'color' ? 'original' : 'color'}
