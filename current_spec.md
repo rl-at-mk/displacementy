@@ -1,9 +1,9 @@
 # Spec — Rendering core, export & derived maps
 
 > Status: everything under **Shipped** is done, tested, and verified in-browser
-> (91 unit tests green at last count). No active work in flight. (The prior
-> parameter-locks spec was fully implemented and removed; the code is its
-> record.)
+> (92 unit tests green at last count). Active work: **custom sprite packs**
+> (final section). (The prior parameter-locks spec was fully implemented and
+> removed; the code is its record.)
 
 ## Shipped — CPU float-precision rendering core (Phases 0–D)
 
@@ -227,3 +227,76 @@ inputs; dialog export downloads the zip + toast; map cards render for all four
 maps; disabled groups collapse; wheel-zoom transform + double-click reset;
 typed slider value (3.7) commits. 91 unit tests, tsc, Prettier, and the
 production build all green (layout-only change — no pipeline code touched).
+
+---
+
+## Active — Custom sprite packs (planned)
+
+Let users upload their own sprite images as named packs that behave like the
+built-in ones (selectable, randomizable, deterministic), persisted locally.
+
+**Resolved decisions:** persistence = **IndexedDB** (survives reloads; thin
+hand-rolled wrapper, no new dep); shared URLs = **warn + drop** when a
+referenced custom pack is missing locally; pack **export/import (.zip) is
+deferred to v2** — the content-hash id design below makes it a drop-in later.
+
+### Design
+
+1. **Determinism constraint (drives everything).** `drawSprite` selects via
+   `randomItem(sprites)`, so the sprite list's **length and order feed the
+   PRNG**: reproducing a render requires the identical list. Therefore:
+   - Sprite list order is canonical: **built-ins in today's fixed order, then
+     enabled custom packs sorted by id**; files within a pack are **sorted by
+     filename at import time** and stored in that order.
+   - Pack **id = `custom_` + first 8 hex of SHA-256** over the ordered file
+     bytes (`crypto.subtle.digest`) — content-addressed, so two machines that
+     import the same files get the same id (this is what makes the v2 zip
+     sharing loop, and same-pack URL reproduction, possible).
+2. **Storage — new `spritePacksDb.ts`** (thin IndexedDB wrapper, promise-based):
+   `listPacks()`, `addPack(name, files)` (sorts, hashes, stores
+   `{id, name, blobs[]}`; rejects packs with no decodable images), and
+   `deletePack(id)`. Quota/IDB errors surface as toasts, never crash.
+3. **Store integration.**
+   - `spritesPacks` widens from the closed `SpritesPack` union to `string[]`
+     (built-in keys + `custom_<id>` tokens). Serialization to the URL is
+     unchanged (`join(',')`).
+   - New state `customPacks` (id, name, count, object URLs), loaded from
+     IndexedDB **once at app init**. Because URL parsing runs before the async
+     IDB load, parse keeps unknown `custom_*` tokens; a **reconcile step**
+     after the load drops tokens with no local pack and shows the toast
+     ("This link uses a custom sprite pack you don't have — the render will
+     differ.").
+   - `getSprites()` appends enabled custom packs (blobs → cached object URLs →
+     the existing `loadSprites` → 512² rasterize → `ImageBitmap` path; SVG and
+     PNG/JPG/WebP all accepted since everything is rasterized).
+   - `randSpritesPacks()` pool = built-ins + loaded custom ids (customs join
+     Randomize-all like any pack; `spritesPacks` stays lockable as today).
+   - Deleting a pack deselects it everywhere.
+4. **UI (Settings → Sprites group).** Below the built-in pack checkboxes: one
+   row per custom pack (checkbox with name + sprite count, Delete button) and
+   an **"Add pack…"** button opening a `Dialog` (reuses `ui/Dialog` + `Input`):
+   pack name + multi-file picker (`accept='image/svg+xml,image/png,image/jpeg,
+   image/webp'`, styled Button + hidden input — no new primitive), with a hint
+   that **white-on-transparent shapes** work best (the float core reads the `r`
+   channel). Empty/invalid selections are rejected with a message.
+5. **Determinism guard** unaffected (list construction happens outside
+   `draw()`'s op trace). No renderer changes at all — the feature is entirely
+   pack sourcing.
+
+### Tests & verification
+
+- Unit: content-hash id is stable and filename-order-independent (same files,
+  any selection order → same id); URL parse keeps unknown `custom_*` tokens;
+  reconcile drops missing packs and preserves known ones; sprite-list ordering
+  (built-ins then customs by id) is deterministic. IDB itself is exercised
+  live, not unit-tested (keep the wrapper thin).
+- Live: upload a pack → render uses it (different output vs. without);
+  reload → pack persists and re-renders identically (same URL, same pixels);
+  Copy URL on a second profile/incognito → toast + pack dropped; delete pack →
+  deselected; Randomize-all can select customs; lock respected.
+
+### Deferred to v2
+
+Pack **export/import as .zip** (`fflate`, manifest with name + ordered
+filenames; import re-hashes to verify the id), thumbnails in the pack row,
+rename.
