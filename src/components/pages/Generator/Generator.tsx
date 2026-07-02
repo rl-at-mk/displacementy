@@ -28,7 +28,7 @@ export function Generator() {
         </div>
         <div className='flex items-center gap-4 text-xs text-white/50'>
           <span>
-            Based on 
+            Based on{' '}
             <HeaderLink href='https://github.com/satelllte/displacementx'>
               DisplacementX
             </HeaderLink>
