@@ -20,7 +20,8 @@ import {MAP_REGISTRY, getMap} from './utils/maps/registry';
 import {type MapDepth, type MapDescriptor} from './utils/maps/types';
 import {buildLUT, type Stop} from './utils/maps/lut';
 import {drawInvert} from './utils/drawInvert';
-import {saveImage} from './utils/saveImage';
+import {deliverFile} from '@/utils/deliverFile';
+import {publishSettings} from '../settingsTransport';
 import {encodeHeightmap16} from './utils/heightmapPng';
 import {encodeHeightmapExr} from './utils/heightmapExr';
 import {getCtx2dFromRef} from './utils/getCtx2dFromRef';
@@ -275,19 +276,6 @@ export function CanvasSection() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const downloadBytes = (
-      bytes: Uint8Array,
-      fileName: string,
-      mimeType: string,
-    ): void => {
-      const url = URL.createObjectURL(new Blob([bytes], {type: mimeType}));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-
     // 16/32-bit: export the retained float height buffer (always the height map,
     // at full precision — independent of any preview or inversion).
     if (bitDepth === '16' || bitDepth === '32') {
@@ -298,14 +286,10 @@ export function CanvasSection() {
 
       if (bitDepth === '16') {
         // 16-bit grayscale PNG: lossless heightmap, 65,536 levels.
-        downloadBytes(
-          encodeHeightmap16(data, w, h),
-          `${base}.png`,
-          'image/png',
-        );
+        deliverFile(encodeHeightmap16(data, w, h), `${base}.png`, 'image/png');
       } else {
         // 32-bit float OpenEXR: the float buffer written verbatim, no loss.
-        downloadBytes(
+        deliverFile(
           encodeHeightmapExr(data, w, h),
           `${base}.exr`,
           'image/x-exr',
@@ -315,10 +299,14 @@ export function CanvasSection() {
     }
 
     // 8-bit: the visible canvas as-is (respects the current preview/inversion).
-    saveImage({
-      canvas,
-      fileName: `DisplacementY_${width}x${height}_${dateTimeStamp()}`,
-    });
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      deliverFile(
+        blob,
+        `DisplacementY_${width}x${height}_${dateTimeStamp()}.png`,
+        'image/png',
+      );
+    }, 'image/png');
   };
 
   // Export the selected maps as a single zip, derived from the retained float
@@ -346,14 +334,7 @@ export function CanvasSection() {
         return;
       }
 
-      const url = URL.createObjectURL(
-        new Blob([message.zip], {type: 'application/zip'}),
-      );
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${zipName}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
+      deliverFile(message.zip, `${zipName}.zip`, 'application/zip');
       worker.terminate();
       setIsExporting(false);
       showToast(`Exported ${zipName}.zip`);
@@ -383,10 +364,8 @@ export function CanvasSection() {
 
   const copyUrl = () => {
     const query = useStore.getState().getSettingsQuery();
-    const url = `${window.location.origin}${window.location.pathname}?${query}`;
-    // Reflect the current settings in the address bar...
-    window.history.replaceState(null, '', url);
-    // ...and put the full shareable URL on the clipboard.
+    // Reflect the settings in the address bar and get the shareable string.
+    const url = publishSettings(query);
     if (navigator.clipboard) {
       void navigator.clipboard.writeText(url);
     }

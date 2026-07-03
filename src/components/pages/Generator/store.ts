@@ -46,6 +46,17 @@ import {
   decodeStops,
   type Stop,
 } from './CanvasSection/utils/maps/lut';
+import {readSettingsQuery} from './settingsTransport';
+import {
+  addPack,
+  computePackId,
+  deletePack,
+  isValidCustomPackToken,
+  listPacks,
+  reconcileSpritePacks,
+  sortFilesByName,
+  type CustomPack,
+} from './spritePacksDb';
 
 type Values = {
   initialSeed: number;
@@ -78,7 +89,8 @@ type Values = {
   linesAlpha: NumberDual;
   linesWidth: NumberDual;
   spritesEnabled: boolean;
-  spritesPacks: SpritesPack[];
+  /** Built-in pack keys plus `custom_<hash>` tokens for user packs. */
+  spritesPacks: string[];
   spritesRotationEnabled: boolean;
   seamlessTextureEnabled: boolean;
   compositionModes: CompositionMode[];
@@ -239,8 +251,36 @@ type LockState = {
   setLock: (key: LockableKey, value: boolean) => void;
 };
 
+/** A loaded custom sprite pack, ready to render (blobs → object URLs). */
+export type CustomPackUi = {
+  id: string;
+  name: string;
+  count: number;
+  urls: string[];
+};
+
+type CustomPacksState = {
+  /** Loaded custom packs, kept sorted by id (the canonical sprite order). */
+  customPacks: CustomPackUi[];
+  /**
+   * Load packs from IndexedDB and reconcile `spritesPacks` against them —
+   * `custom_*` tokens with no local pack (e.g. from a shared URL) are dropped
+   * and returned so the caller can warn the user.
+   */
+  loadCustomPacks: () => Promise<{dropped: string[]}>;
+  /**
+   * Validate, hash, persist, and select a new pack built from `files`.
+   * Returns the pack id, or an error message for the UI.
+   */
+  addCustomPack: (
+    name: string,
+    files: File[],
+  ) => Promise<{ok: true; id: string} | {ok: false; error: string}>;
+  deleteCustomPack: (id: string) => Promise<void>;
+};
+
 export const useStore = create<
-  Values & Setters & ComputedValues & Actions & LockState
+  Values & Setters & ComputedValues & Actions & LockState & CustomPacksState
 >((set, get) => ({
   // Values
   // ---
@@ -249,6 +289,87 @@ export const useStore = create<
   // client-side via `initializeValues()` after hydration.
   ...defaultValues(),
   locks: allUnlocked(),
+  // Custom sprite packs
+  // ---
+  customPacks: [],
+  async loadCustomPacks() {
+    let packs: CustomPack[] = [];
+    try {
+      packs = await listPacks();
+    } catch {
+      // IndexedDB unavailable (private mode, etc.) — behave as "no packs".
+    }
+    const customPacks = packs
+      .map(toCustomPackUi)
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const {kept, dropped} = reconcileSpritePacks(
+      get().spritesPacks,
+      customPacks.map((pack) => pack.id),
+    );
+    set(() => ({
+      customPacks,
+      ...(dropped.length > 0 ? {spritesPacks: kept} : {}),
+    }));
+    return {dropped};
+  },
+  async addCustomPack(name: string, files: File[]) {
+    // Keep only files the browser can actually decode as images (covers SVG,
+    // which `createImageBitmap` would falsely reject when dimensionless).
+    const usable: File[] = [];
+    for (const file of files) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await canLoadAsImage(file)) usable.push(file);
+    }
+    if (usable.length === 0) {
+      return {
+        ok: false as const,
+        error: 'No usable images — supported: SVG, PNG, JPEG, WebP.',
+      };
+    }
+
+    try {
+      const sorted = sortFilesByName(usable);
+      const id = await computePackId(
+        sorted.map((file) => ({name: file.name, blob: file})),
+      );
+      const pack: CustomPack = {
+        id,
+        name: name.trim() || 'Custom pack',
+        blobs: sorted,
+      };
+      await addPack(pack);
+      set((state) => ({
+        // Same content ⇒ same id ⇒ replace instead of duplicating.
+        customPacks: [
+          ...state.customPacks.filter((p) => p.id !== id),
+          toCustomPackUi(pack),
+        ].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+        // Select the new pack right away.
+        spritesPacks: [...state.spritesPacks.filter((p) => p !== id), id],
+      }));
+      return {ok: true as const, id};
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: `Could not store the pack (${String(
+          error instanceof Error ? error.message : error,
+        )}).`,
+      };
+    }
+  },
+  async deleteCustomPack(id: string) {
+    try {
+      await deletePack(id);
+    } catch {
+      // Removing it from the UI is still correct even if IDB cleanup failed.
+    }
+    const pack = get().customPacks.find((p) => p.id === id);
+    for (const url of pack?.urls ?? []) URL.revokeObjectURL(url);
+    set((state) => ({
+      customPacks: state.customPacks.filter((p) => p.id !== id),
+      spritesPacks: state.spritesPacks.filter((p) => p !== id),
+    }));
+  },
   // Setters
   // ---
   setInitialSeed(initialSeed: Values['initialSeed']) {
@@ -387,6 +508,19 @@ export const useStore = create<
     if (hasAggromaxx) addSprites('aggromaxx', 12);
     if (hasCrappack) addSprites('crappack', 27);
 
+    // Enabled custom packs, after built-ins, in id order — the canonical
+    // sequence the deterministic sprite selection depends on. (`customPacks`
+    // is kept id-sorted; the loop preserves that order.)
+    const {customPacks} = get();
+    for (const pack of customPacks) {
+      if (!spritesPacks.includes(pack.id)) continue;
+      for (const url of pack.urls) {
+        const sprite = new Image();
+        sprite.src = url;
+        sprites.push(sprite);
+      }
+    }
+
     return sprites;
   },
   getSettingsQuery() {
@@ -405,7 +539,12 @@ export const useStore = create<
     set((state) => ({locks: {...state.locks, [key]: value}}));
   },
   randomize() {
-    set((state) => applyLocks(randomValues(), state.locks));
+    set((state) =>
+      applyLocks(
+        randomValues(state.customPacks.map((pack) => pack.id)),
+        state.locks,
+      ),
+    );
   },
   randomizeRect() {
     set((state) =>
@@ -477,7 +616,9 @@ export const useStore = create<
     set((state) =>
       applyLocks(
         {
-          spritesPacks: randSpritesPacks(),
+          spritesPacks: randSpritesPacks(
+            state.customPacks.map((pack) => pack.id),
+          ),
           spritesRotationEnabled: randomBoolean(),
         },
         state.locks,
@@ -527,8 +668,38 @@ function randDualSetting(setting: SettingDualConstant): NumberDual {
   return a <= b ? [a, b] : [b, a];
 }
 
-function randSpritesPacks(): SpritesPack[] {
-  return ALL_SPRITES_PACKS.filter(() => randomBoolean());
+/** Blobs → object URLs, ready for `getSprites()` / the render pipeline. */
+function toCustomPackUi(pack: CustomPack): CustomPackUi {
+  return {
+    id: pack.id,
+    name: pack.name,
+    count: pack.blobs.length,
+    urls: pack.blobs.map((blob) => URL.createObjectURL(blob)),
+  };
+}
+
+/**
+ * Whether the browser can decode this blob as an image, via an `Image` load
+ * (works for dimensionless SVGs, unlike `createImageBitmap`).
+ */
+async function canLoadAsImage(blob: Blob): Promise<boolean> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(true);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(false);
+    };
+    img.src = url;
+  });
+}
+
+function randSpritesPacks(customIds: string[]): string[] {
+  return [...ALL_SPRITES_PACKS, ...customIds].filter(() => randomBoolean());
 }
 
 function randCompositionModes(): CompositionMode[] {
@@ -539,7 +710,7 @@ function randCompositionModes(): CompositionMode[] {
  * A fully randomized set of values, used by `randomize()` and as the
  * fallback when the page is loaded without any query parameters.
  */
-function randomValues(): Values {
+function randomValues(customPackIds: string[] = []): Values {
   return {
     initialSeed: randSetting(initialSeed),
     iterations: randSetting(iterations),
@@ -571,7 +742,7 @@ function randomValues(): Values {
     linesAlpha: randDualSetting(linesAlpha),
     linesWidth: randDualSetting(linesWidth),
     spritesEnabled: randomBoolean(),
-    spritesPacks: randSpritesPacks(),
+    spritesPacks: randSpritesPacks(customPackIds),
     spritesRotationEnabled: randomBoolean(),
     seamlessTextureEnabled: seamlessTextureEnabled.default,
     compositionModes: randCompositionModes(),
@@ -674,7 +845,7 @@ function getInitialValues(): Values & {locks: Locks} {
     return {...defaultValues(), locks: allUnlocked()};
   }
 
-  const params = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(readSettingsQuery());
   if ([...params.keys()].length === 0) {
     return {...randomValues(), locks: allUnlocked()};
   }
@@ -721,9 +892,8 @@ function getInitialValues(): Values & {locks: Locks} {
     linesAlpha: dual('linesAlpha', base.linesAlpha),
     linesWidth: dual('linesWidth', base.linesWidth),
     spritesEnabled: bool('spritesEnabled', base.spritesEnabled),
-    spritesPacks: parseList(
+    spritesPacks: parseSpritesPacks(
       params.get('spritesPacks'),
-      ALL_SPRITES_PACKS,
       base.spritesPacks,
     ),
     spritesRotationEnabled: bool(
@@ -742,6 +912,21 @@ function getInitialValues(): Values & {locks: Locks} {
     lutStops: parseLutStops(params),
     locks: parseLocks(params.get('locks')),
   };
+}
+
+/**
+ * Parses the `spritesPacks` param: built-in keys are validated against
+ * `ALL_SPRITES_PACKS`; well-formed `custom_*` tokens are kept **unvalidated**
+ * (packs load from IndexedDB *after* URL parsing — `loadCustomPacks()`
+ * reconciles and drops tokens with no local pack, warning the user).
+ */
+function parseSpritesPacks(raw: string | null, fallback: string[]): string[] {
+  if (raw === null) return fallback;
+  if (raw === '') return [];
+  const items = raw.split(',').map((p) => p.trim());
+  const builtIn = ALL_SPRITES_PACKS.filter((value) => items.includes(value));
+  const custom = [...new Set(items.filter(isValidCustomPackToken))];
+  return [...builtIn, ...custom];
 }
 
 /**

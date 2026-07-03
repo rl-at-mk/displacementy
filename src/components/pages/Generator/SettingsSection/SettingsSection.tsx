@@ -1,6 +1,10 @@
 'use client';
+import {useRef, useState} from 'react';
 import {Button} from '@/components/ui/Button';
 import {Checkbox} from '@/components/ui/Checkbox';
+import {Dialog} from '@/components/ui/Dialog';
+import {Input} from '@/components/ui/Input';
+import {showToast} from '@/components/ui/Toast';
 import {useStore, type LockableKey} from '../store';
 import {SectionTitle} from '../SectionTitle';
 import {
@@ -28,7 +32,6 @@ import {
   linesBrightness as linesBrightnessConst,
   linesAlpha as linesAlphaConst,
   linesWidth as linesWidthConst,
-  type SpritesPack,
   type CompositionMode,
 } from '../constants';
 import {Group} from './Group';
@@ -126,6 +129,32 @@ export function SettingsSection() {
 
   const setSpritesEnabled = useStore((state) => state.setSpritesEnabled);
   const setSpritesPacks = useStore((state) => state.setSpritesPacks);
+  const customPacks = useStore((state) => state.customPacks);
+  const addCustomPack = useStore((state) => state.addCustomPack);
+  const deleteCustomPack = useStore((state) => state.deleteCustomPack);
+
+  // "Add sprite pack" dialog state.
+  const [addPackOpen, setAddPackOpen] = useState<boolean>(false);
+  const [packName, setPackName] = useState<string>('');
+  const [packFiles, setPackFiles] = useState<File[]>([]);
+  const [packError, setPackError] = useState<string | undefined>(undefined);
+  const [packAdding, setPackAdding] = useState<boolean>(false);
+  const packFileInputRef = useRef<HTMLInputElement>(null);
+
+  const submitPack = async () => {
+    setPackAdding(true);
+    setPackError(undefined);
+    const result = await addCustomPack(packName, packFiles);
+    setPackAdding(false);
+    if (result.ok) {
+      setAddPackOpen(false);
+      setPackName('');
+      setPackFiles([]);
+      showToast('Sprite pack added and selected');
+    } else {
+      setPackError(result.error);
+    }
+  };
 
   const setCompositionModes = useStore((state) => state.setCompositionModes);
   const setSpritesRotationEnabled = useStore(
@@ -421,7 +450,7 @@ export function SettingsSection() {
             lockLabel='Sprite packs'
             {...lockProps('spritesPacks')}
           >
-            <Checkboxes<SpritesPack>
+            <Checkboxes<string>
               items={[
                 {label: 'Classic', value: 'classic'},
                 {label: 'Big data', value: 'bigdata'},
@@ -431,6 +460,42 @@ export function SettingsSection() {
               values={spritesPacks}
               setValues={setSpritesPacks}
             />
+            {customPacks.map((pack) => (
+              <div
+                key={pack.id}
+                className='flex items-center justify-between gap-2'
+              >
+                <Checkbox
+                  label={`${pack.name} (${pack.count})`}
+                  isChecked={spritesPacks.includes(pack.id)}
+                  setIsChecked={(checked) => {
+                    setSpritesPacks([
+                      ...spritesPacks.filter((p) => p !== pack.id),
+                      ...(checked ? [pack.id] : []),
+                    ]);
+                  }}
+                />
+                <Button
+                  size='sm'
+                  title={`Delete pack "${pack.name}"`}
+                  onClick={() => {
+                    void deleteCustomPack(pack.id);
+                  }}
+                >
+                  Delete
+                </Button>
+              </div>
+            ))}
+            <div className='pt-1'>
+              <Button
+                onClick={() => {
+                  setPackError(undefined);
+                  setAddPackOpen(true);
+                }}
+              >
+                Add pack…
+              </Button>
+            </div>
           </CheckboxesGroup>
           <CheckboxesGroup title='Other options'>
             <Checkbox
@@ -472,6 +537,66 @@ export function SettingsSection() {
           </CheckboxesGroup>
         </Group>
       </div>
+      {/* Add-custom-sprite-pack dialog. */}
+      <Dialog
+        title='Add sprite pack'
+        open={addPackOpen}
+        onOpenChange={setAddPackOpen}
+      >
+        <div className='flex flex-col gap-3'>
+          <div className='sm:w-2/3'>
+            <Input
+              label='Pack name'
+              placeholder='Custom pack'
+              value={packName}
+              setValue={setPackName}
+            />
+          </div>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Button
+              onClick={() => {
+                packFileInputRef.current?.click();
+              }}
+            >
+              Choose images…
+            </Button>
+            <span className='text-xs text-white/70'>
+              {packFiles.length > 0
+                ? `${packFiles.length} file(s) selected`
+                : 'No files selected'}
+            </span>
+            <input
+              ref={packFileInputRef}
+              type='file'
+              multiple
+              accept='image/svg+xml,image/png,image/jpeg,image/webp'
+              className='hidden'
+              onChange={(event) => {
+                setPackFiles([...(event.target.files ?? [])]);
+              }}
+            />
+          </div>
+          <span className='text-xs text-white/70 italic'>
+            White shapes on a transparent background work best — the generator
+            reads brightness. SVG, PNG, JPEG and WebP are supported. Sprites are
+            ordered by filename.
+          </span>
+          {packError !== undefined && (
+            <span className='text-xs text-pink'>{packError}</span>
+          )}
+          <div className='flex gap-1 pt-1'>
+            <Button
+              disabled={packAdding || packFiles.length === 0}
+              title={packFiles.length === 0 ? 'Choose images first' : undefined}
+              onClick={() => {
+                void submitPack();
+              }}
+            >
+              {packAdding ? 'Adding…' : 'Add pack'}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </section>
   );
 }

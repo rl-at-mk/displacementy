@@ -1,6 +1,6 @@
 import {useEffect, useRef} from 'react';
 import {softwareVersion} from '@/constants/softwareVersion';
-import {Toaster} from '@/components/ui/Toast';
+import {showToast, Toaster} from '@/components/ui/Toast';
 import {CanvasSection} from './CanvasSection';
 import {SettingsSection} from './SettingsSection';
 import {useStore} from './store';
@@ -14,6 +14,18 @@ export function Generator() {
     if (initialized.current) return;
     initialized.current = true;
     useStore.getState().initializeValues();
+    // Custom sprite packs load async from IndexedDB after URL parsing; the
+    // reconcile drops pack tokens this browser doesn't have (shared links).
+    void useStore
+      .getState()
+      .loadCustomPacks()
+      .then(({dropped}) => {
+        if (dropped.length > 0) {
+          showToast(
+            "This link uses a custom sprite pack you don't have — the render will differ.",
+          );
+        }
+      });
   }, []);
 
   // App shell: at `lg:` the page is a fixed-viewport layout — the canvas pane
@@ -31,12 +43,12 @@ export function Generator() {
             Based on{' '}
             <HeaderLink href='https://github.com/satelllte/displacementx'>
               DisplacementX
-            </HeaderLink>
-            {' '}by{' '}
+            </HeaderLink>{' '}
+            by{' '}
             <HeaderLink href='https://github.com/satelllte'>
               @satelllte
-            </HeaderLink>
-            {' '}Modified by{' '}
+            </HeaderLink>{' '}
+            Modified by{' '}
             <HeaderLink href='https://github.com/RoyalNoob'>
               @RoyalNoob
             </HeaderLink>

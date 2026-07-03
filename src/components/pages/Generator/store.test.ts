@@ -138,3 +138,13 @@ describe('dual values are always ordered [lo, hi]', () => {
     }
   });
 });
+
+describe('custom sprite pack tokens', () => {
+  it('round-trips custom_<hash> tokens through the settings query', () => {
+    useStore.getState().setSpritesPacks(['classic', 'custom_12ab34cd']);
+    const query = useStore.getState().getSettingsQuery();
+    expect(new URLSearchParams(query).get('spritesPacks')).toBe(
+      'classic,custom_12ab34cd',
+    );
+  });
+});
