@@ -176,6 +176,31 @@ positions**, built as reusable LUT machinery.
 - Parallelizing the generation loop (breaks PRNG order).
 - Group-level locks, lock-all, reroll-as-preset (from the prior locks spec).
 
+## Reference — desktop packaging notes (Electron/Tauri, not scheduled)
+
+Audit result: the app is already desktop-portable (self-contained static
+build, Worker compute, no backend). If packaging ever happens:
+
+- **Needs rework then:** "Copy URL" transport (no public origin on desktop —
+  the query-string *format* survives as the preset format; swap the transport
+  for preset files / clipboard strings / web-app-prefixed links); file saves
+  (native dialogs via IPC instead of anchor downloads); module workers require
+  the static build served over a **custom protocol** (plain `file://` breaks
+  module workers); sprite packs optionally move from IndexedDB to folders.
+- **Non-issues:** OffscreenCanvas, `createImageBitmap`, `crypto.subtle`
+  (file:// is a secure context), clipboard, fast-png/fflate, memory (desktop
+  relaxes it), Astro (its static output is exactly what gets wrapped).
+- **Engine choice matters for determinism:** the PRNG is engine-exact, but
+  sprite rasterization goes through canvas `drawImage` AA, which differs
+  across browser engines. **Electron pins Chromium → renders bit-identical on
+  every install (strengthens the contract). Tauri uses OS webviews (WKWebView
+  on macOS = Safari) → reintroduces engine variance** and weaker
+  worker/OffscreenCanvas support. Prefer Electron for this app.
+- **Seams prepared in advance** (see the custom-sprite-packs pass, step 0):
+  single `deliverFile` util; settings-transport module; storage-agnostic
+  `spritePacksDb` interface. Everything else (IPC scaffolding, protocol
+  registration, Vite-instead-of-Astro) is YAGNI until packaging is decided.
+
 ## Shipped — UI declutter: app-shell layout + export dialog
 
 The page moved from one long scrolling document to a **fixed-viewport app
@@ -241,6 +266,21 @@ referenced custom pack is missing locally; pack **export/import (.zip) is
 deferred to v2** — the content-hash id design below makes it a drop-in later.
 
 ### Design
+
+0. **Prep — desktop-portability seams** (folded into this pass since it touches
+   the same files; see "Reference — desktop packaging notes"):
+   - **Consolidate file delivery**: one `deliverFile(bytes, fileName, mimeType)`
+     util replacing the three duplicated `createObjectURL → <a download> →
+     click` sites (`downloadBytes` in `download()`, the zip handler in
+     `exportMaps`, and `saveImage.ts`). Deduplication today; the future
+     native-save-dialog swap becomes a one-file change.
+   - **Settings-transport seam**: a small module owning
+     `readSettingsQuery(): string` and `publishSettings(query): url` so
+     `store.ts` (`getInitialValues`) and `copyUrl` never touch
+     `window.location`/`history` directly. The query-string format is the
+     preset format; only the transport is swappable (desktop: preset files /
+     web-app-prefixed links).
+   - Behavior-preserving: no UI or output change; existing tests stay green.
 
 1. **Determinism constraint (drives everything).** `drawSprite` selects via
    `randomItem(sprites)`, so the sprite list's **length and order feed the
